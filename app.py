@@ -22,6 +22,7 @@ SUPPORTED_MODELS = [
     "gpt-4.1-mini",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-3-flash-preview",
     "gemini-3-pro-preview",
     "claude-3-5-sonnet-latest",
     "claude-3-5-haiku-latest",
@@ -34,6 +35,9 @@ MODEL_PROVIDER_MAP = {
     "gpt-4.1-mini": ("openai", "gpt-4.1-mini"),
     "gemini-2.5-flash": ("google", "gemini-2.5-flash"),
     "gemini-2.5-flash-lite": ("google", "gemini-2.5-flash-lite"),
+    # New: flash-preview for dataset prompting
+    "gemini-3-flash-preview": ("google", "gemini-3-flash-preview"),
+    # Kept for backward compatibility with agents.yaml
     "gemini-3-pro-preview": ("google", "gemini-3-pro-preview"),
     "claude-3-5-sonnet-latest": ("anthropic", "claude-3-5-sonnet-latest"),
     "claude-3-5-haiku-latest": ("anthropic", "claude-3-5-haiku-latest"),
@@ -134,6 +138,22 @@ UI_STRINGS = {
         "upload": "Upload",
         "api_connected": "Connected",
         "api_missing": "Missing",
+        # New: dataset preview and dataset chat
+        "dataset_preview_section": "Data Explorer & Dataset Chat",
+        "dataset_select": "Select Dataset",
+        "dataset_510k": "510(k) List",
+        "dataset_gudid": "GUDID Dataset",
+        "dataset_class": "Classification Dataset",
+        "dataset_safety": "Safety Notice List",
+        "dataset_recall": "Recall List",
+        "dataset_master": "Master Linked View",
+        "dataset_rows": "Rows",
+        "dataset_cols": "Columns",
+        "dataset_prompt_header": "Ask AI About This Dataset",
+        "dataset_prompt_input": "Question / Task (specific to this dataset)",
+        "dataset_model": "Model (for dataset analysis)",
+        "dataset_run": "Run Dataset Analysis",
+        "dataset_empty": "This dataset is currently empty.",
     },
     "zh": {
         "title": "代理式醫療器材 TPLC 儀表板",
@@ -202,6 +222,22 @@ UI_STRINGS = {
         "upload": "上傳",
         "api_connected": "已連線",
         "api_missing": "尚未設定",
+        # New: dataset preview and dataset chat
+        "dataset_preview_section": "資料總覽與資料集 AI 對話",
+        "dataset_select": "選擇資料集",
+        "dataset_510k": "510(k) 清單",
+        "dataset_gudid": "GUDID 資料集",
+        "dataset_class": "分類代碼資料集",
+        "dataset_safety": "安全公告清單",
+        "dataset_recall": "回收清單",
+        "dataset_master": "主連結檢視（Master View）",
+        "dataset_rows": "筆數",
+        "dataset_cols": "欄位數",
+        "dataset_prompt_header": "針對此資料集提問 AI",
+        "dataset_prompt_input": "與此資料集相關的問題／任務說明",
+        "dataset_model": "使用模型（資料集分析）",
+        "dataset_run": "執行資料集分析",
+        "dataset_empty": "此資料集目前為空。",
     },
 }
 
@@ -725,6 +761,115 @@ def render_dashboard():
     else:
         st.info("No master data available. Please upload datasets or use mock data.")
 
+    # NEW: Dataset Explorer & Dataset Chat
+    render_dataset_explorer()
+
+
+def render_dataset_explorer():
+    st.markdown("---")
+    st.markdown(f"### {t('dataset_preview_section')}")
+
+    dm: DataManager = st.session_state["data_manager"]
+
+    dataset_options = [
+        ("510k", t("dataset_510k")),
+        ("gudid", t("dataset_gudid")),
+        ("class", t("dataset_class")),
+        ("safety", t("dataset_safety")),
+        ("recall", t("dataset_recall")),
+        ("master", t("dataset_master")),
+    ]
+    sel_key = st.selectbox(
+        t("dataset_select"),
+        options=[opt[0] for opt in dataset_options],
+        format_func=lambda k: dict(dataset_options)[k],
+        key="dataset_select_key",
+    )
+
+    # Map key to actual DataFrame
+    if sel_key == "510k":
+        df = dm.df_510k
+    elif sel_key == "gudid":
+        df = dm.df_gudid
+    elif sel_key == "class":
+        df = dm.df_class
+    elif sel_key == "safety":
+        df = dm.df_safety
+    elif sel_key == "recall":
+        df = dm.df_recall
+    else:
+        df = dm.df_master
+
+    # Preview
+    if df is None or df.empty:
+        st.warning(t("dataset_empty"))
+        return
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**{t('dataset_rows')}:** {len(df)}")
+    with c2:
+        st.markdown(f"**{t('dataset_cols')}:** {len(df.columns)}")
+
+    st.dataframe(df.head(50), use_container_width=True)
+
+    # Dataset-specific prompt
+    st.markdown(f"#### {t('dataset_prompt_header')}")
+
+    ds_models = ["gpt-4o-mini", "gemini-2.5-flash", "gemini-3-flash-preview"]
+    ds_model = st.selectbox(
+        t("dataset_model"),
+        options=ds_models,
+        index=0,
+        key="dataset_model_select",
+    )
+
+    question = st.text_area(
+        t("dataset_prompt_input"),
+        height=160,
+        key="dataset_prompt_input",
+    )
+
+    if st.button(t("dataset_run"), key="dataset_run_btn"):
+        orchestrator: LLMOrchestrator = st.session_state["llm_orchestrator"]
+        try:
+            # Build schema and sample context
+            schema_str = ", ".join([f"{col} ({dtype})" for col, dtype in zip(df.columns, df.dtypes)])
+            # Use up to 20 rows as context
+            sample_df = df.head(20)
+            try:
+                sample_md = sample_df.to_markdown(index=False)
+            except Exception:
+                sample_md = sample_df.to_string(index=False)
+
+            system_prompt = textwrap.dedent(f"""
+            你是一位專精 FDA 醫療器材 TPLC 資料的分析顧問。
+            你現在看到的是單一資料集的結構與前幾列樣本，請根據這個資料集來回答問題或提出分析建議。
+            - 優先解釋你如何利用欄位與樣本來推論
+            - 若資料不足以支持某結論，請明確說明不確定性
+            - 若需要，提供 pandas 分析步驟構想，但不要假設可以直接執行程式
+
+            [DATASET SCHEMA]
+            {schema_str}
+
+            [DATASET SAMPLE]
+            {sample_md}
+            """).strip()
+
+            user_prompt = question or "請根據這個資料集，說明可以進行哪些有意義的 TPLC 分析。"
+
+            out = orchestrator.call_llm(
+                model=ds_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=3000,
+                temperature=0.3,
+            )
+            st.markdown("##### AI Output")
+            st.markdown(out)
+        except Exception as e:
+            st.error(f"Dataset analysis error: {e}")
+
 
 def render_agent_lab():
     st.subheader(t("agents"))
@@ -1014,7 +1159,7 @@ def render_note_keeper():
             key="note_chat_prompt",
         )
         if st.button("Run Chat", key="note_chat_run"):
-            try                :
+            try:
                 system_prompt = "你是一位專精 FDA 醫療器材 TPLC 的顧問，回答時可直接引用筆記內容。"
                 user_prompt = f"=== NOTE ===\n{st.session_state['note_md'] or st.session_state['note_raw']}\n\n=== QUESTION ===\n{chat_prompt}"
                 out = orchestrator.call_llm(
@@ -1080,7 +1225,7 @@ def render_note_keeper():
         )
         if st.button("Generate Risk Scenarios", key="magic1_run"):
             try:
-                system_prompt = "你是一位醫療器材風險管理專家，擅長以 ISO 14971 思維設計風險情境與控制措施。"
+                system_prompt = "你是一位醫療器材風險管理專家，擅長以 ISO 14971 思維設計風隻情境與控制措施。"
                 user_prompt = f"=== NOTE ===\n{st.session_state['note_md'] or st.session_state['note_raw']}\n\n=== TASK ===\n{prompt_risk}"
                 out = orchestrator.call_llm(
                     model="gpt-4o-mini",
