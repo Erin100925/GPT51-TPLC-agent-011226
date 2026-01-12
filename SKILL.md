@@ -1,96 +1,356 @@
-# Skill: fda_supply_chain_overview
-**Description:** 針對醫療器材供應鏈（供應商裝箱單 + 醫院入庫清單）進行高層次總覽，包括主要流向、風險熱點、合規關注點與建議。
-**Parameters:** 
-- input_datasets: 供應商與醫院資料集（結構化文字或表格式摘要）
-- focus: 可選的重點（如：風險、合規、營運效率）
+# Skills Repository
 
-# Skill: udi_and_label_validation
-**Description:** 驗證裝置相關欄位是否符合 UDI 與標籤要求（例如：裝置識別碼、批號、效期格式、UDI segment 一致性）。
-**Parameters:** 
-- device_records: 包含 device_id、lot_number、expiry_date 等欄位的紀錄
-- region: 目標法規區域（如：US-FDA, EU-MDR）
+> 說明：每個 skill 區塊可以被多個代理重複使用。  
+> `skill:` 後面的 ID 會在 agents.yaml 中引用。
 
-# Skill: lot_expiry_risk_scoring
-**Description:** 依照批號與效期，結合出貨/入庫時間與數量，計算效期風險分數與潛在報廢風險。
-**Parameters:** 
-- transactions: 含 lot_number, expiry_date, ship_date, received_date, quantity 的交易紀錄
-- horizon_days: 評估時間視窗（例如 30, 60, 90 天）
+---
 
-# Skill: shipment_receipt_reconciliation
-**Description:** 比對供應商出貨與醫院入庫紀錄，找出數量差異、缺失收貨、重複收貨等異常。
-**Parameters:** 
-- supplier_data: 供應商裝箱單資料
-- hospital_data: 醫院入庫清單資料
-- tolerance: 數量容許誤差百分比或絕對值
+## skill: data_overview
+**描述（Description）：**  
+總覽 GUDID、510(k)、分類、回收與安全公告等資料集的結構與基本統計。
 
-# Skill: cold_chain_breach_detection
-**Description:** 分析冷鏈相關裝置或溫度敏感產品，偵測運輸與存放過程中可能的溫度風險（若有溫度欄位或時間延遲）。
-**Parameters:** 
-- transactions: 含 ship_date, received_date, device_type 或溫度標記的紀錄
-- max_transit_days: 運輸可接受最大天數
-- risk_rules: 自訂風險規則（例如超出某時間即視為高風險）
+**指令（Instruction）：**  
+- 優先列出可用欄位與其大致意義。  
+- 簡要說明樣本數、年份分布與資料缺漏情形。  
+- 對於後續分析提供「可以做什麼」的建議，而非直接下結論。  
 
-# Skill: shortage_and_stockout_forecast
-**Description:** 根據歷史出貨與入庫走勢預估短缺與缺貨風險，並提出備貨或再採購建議（高層級推估）。
-**Parameters:** 
-- time_series: 以時間序列彙總的消耗量或出貨量
-- forecast_horizon: 預測期間長度（例如 30 天）
-- safety_stock_policy: 安全存量政策簡述
+---
 
-# Skill: recall_impact_analysis
-**Description:** 在模擬或實際召回情境下，評估特定批號或裝置召回對各醫院與病人安全的影響範圍。
-**Parameters:** 
-- transactions: 含 device_id, lot_number, hospital_name, quantity 的紀錄
-- recalled_lots: 需召回的批號清單
-- scenario_notes: 情境說明（例如「FDA 安全性通報」）
+## skill: regulatory_search
+**描述：**  
+以法規與合規角度閱讀與整理資訊，但不提供正式法律意見。
 
-# Skill: data_quality_profiling
-**Description:** 對供應鏈資料進行品質剖析，包含缺值率、欄位一致性、異常值與欄位格式問題，並給出修正建議。
-**Parameters:** 
-- dataset: 任一表格型資料
-- critical_fields: 關鍵欄位列表（如 shipment_id, lot_number, quantity）
+**指令：**  
+- 遇到 510(k)、PMA、De Novo 等名詞時，簡要解釋其在 TPLC 中的角色。  
+- 闡述可能相關的 CFR 條款、指導文件或國際標準（只列出方向與關鍵字）。  
+- 若資訊不足，請明確指出「需要額外文件」而不是猜測。  
 
-# Skill: anomaly_pattern_mining
-**Description:** 找出異常模式，例如特定供應商常出現數量差異、特定醫院經常延遲入庫、特定裝置批號常有問題。
-**Parameters:** 
-- supplier_data: 供應商資料
-- hospital_data: 醫院資料
-- pattern_focus: 欲偵測的模式類型（數量異常、時間延遲、退貨率等）
+---
 
-# Skill: multi_site_comparison
-**Description:** 跨醫院或跨供應商比較供應穩定性、異常比例、缺貨與效率，產出基準分析（benchmark）。
-**Parameters:** 
-- metrics_table: 已彙總的指標表（依 hospital_name 或 supplier_name）
-- comparison_axis: 比較軸（醫院、供應商、地區）
+## skill: pattern_spotter
+**描述：**  
+在回收與安全公告描述中尋找重複模式及共通風險因子。
 
-# Skill: visualization_spec_generator
-**Description:** 將分析需求轉換為視覺化規格建議（例如：圖表類型、維度、量測欄位、篩選器），並以自然語言描述。
-**Parameters:** 
-- analysis_goal: 分析目的與要回答的問題
-- available_fields: 可用欄位與其意義
+**指令：**  
+- 特別關注 `root_cause_text`、`classification`、`distribution_pattern` 等欄位。  
+- 使用「可能的共同模式」語氣，而非絕對語氣。  
+- 若建議進一步分析，請說明需要哪些額外資料。  
 
-# Skill: markdown_graph_storyteller
-**Description:** 根據供應鏈與風險分析結果，撰寫以 Markdown 格式呈現的圖表說明與視覺敘事文字。
-**Parameters:** 
-- findings: 主要數據發現與指標
-- graph_plan: 預計製作的圖表清單與目的
+---
 
-# Skill: regulatory_gap_assessment
-**Description:** 針對 FDA 21 CFR 820（QSR）、Part 11 等條文，從流程與資料角度說明目前差距與改善建議。
-**Parameters:** 
-- process_description: 目前流程文字敘述
-- evidence_snippets: 來自資料分析的重點或案例
+## skill: narrative_weaving
+**描述：**  
+將技術性資料轉換為容易理解的敘事故事。
 
-# Skill: narrative_report_writer
-**Description:** 將技術分析與圖表結果轉換成面向管理層或稽核單位可讀的長篇報告（可中英雙語），強調風險與行動方案。
-**Parameters:** 
-- audience: 目標讀者（例如 品管主管、RA、FDA 稽核）
-- key_points: 必須涵蓋的重點列表
-- language: 語言（zh-TW, en 或 bilingual）
+**指令：**  
+- 建議結構：背景 → 問題／事件 → 影響 → 應對與後續計畫。  
+- 適度使用比喻，但避免弱化醫療風險的嚴肅性。  
+- 以非技術讀者（高階主管、臨床人員、病人家屬）可理解的語言撰寫。  
 
-# Skill: prompt_chain_planner
-**Description:** 根據當前需求，設計多代理、多步驟 Prompt 鏈，指定每一代理輸入與輸出以及交接方式。
-**Parameters:** 
-- goal: 最終想要達成的分析或文件成果
-- available_agents: 可用代理與其能力簡述
-- constraints: 限制條件（如時間、成本、模型限制）
+---
+
+## skill: trend_forecast
+**描述：**  
+針對時間序列資料（如核准日期、回收年份）進行趨勢與合理預測。
+
+**指令：**  
+- 先以定性方式描述趨勢，再談任何「預測」。  
+- 明確列出預測的假設與限制，例如樣本數過小、年份過短等。  
+- 不要給出過於精確的數值預測，應以區間或相對變化描述。  
+
+---
+
+## skill: summary_strategic
+**描述：**  
+產出策略導向的高階摘要，協助做出決策。
+
+**指令：**  
+- 以「3–7 個要點」為主，避免條列過長。  
+- 明確分為：觀察（Observation）、影響（Impact）、建議（Recommendation）。  
+- 若資料不足以支持強烈建議，請說明不確定性。  
+
+---
+
+## skill: data_analysis
+**描述：**  
+針對 pandas DataFrame 進行分析構想與 pseudo-code 建議。
+
+**指令：**  
+- 儘量以 Python/pandas 範例程式碼方式描述分析步驟。  
+- 不要假設可以直接執行程式，請以「範例」或「建議步驟」描述。  
+- 說明每一步驟希望回答的問題是什麼。  
+
+---
+
+## skill: code_generation
+**描述：**  
+為使用者產生可用於資料處理與視覺化的程式碼範本。
+
+**指令：**  
+- 使用 Python + pandas + Plotly 為優先。  
+- 加上適度註解，說明每段程式碼的用途。  
+- 若資料表欄位名稱可能不同，請提醒使用者自行對應。  
+
+---
+
+## skill: visualization_suggestion
+**描述：**  
+根據問題與資料型別，建議合適的圖表與互動設計。
+
+**指令：**  
+- 先描述圖表想回答的問題，再說明為何選這種圖。  
+- 建議可用的 Plotly 圖形類型與關鍵欄位映射。  
+- 對於大多數利害關係人不易理解的圖表，請避免推薦。  
+
+---
+
+## skill: risk_matrix
+**描述：**  
+以風險矩陣（嚴重度 × 發生機率）思維整理風險資訊。
+
+**指令：**  
+- 使用 Low/Medium/High 等級描述即可，不需精確數值。  
+- 明確將風險與具體的事件或失效模式對應。  
+- 若沒有足夠資訊評估機率，請標示為「不明」。  
+
+---
+
+## skill: recall_root_cause
+**描述：**  
+整理與歸納回收事件的根本原因。
+
+**指令：**  
+- 集中於 `root_cause_text` 等描述字段。  
+- 嘗試將原因分類（設計、製造、軟體、包裝、標示、人為使用等）。  
+- 強調「觀察到的趨勢」，避免過度外推。  
+
+---
+
+## skill: timeline_builder
+**描述：**  
+為指定產品或族群建立重要事件時間線。
+
+**指令：**  
+- 至少包含：核准／上市、重要安全公告、回收啟動與結束。  
+- 以文字形式列出，必要時可加上「建議圖表型式」。  
+- 若資料年份不完整，請註明。  
+
+---
+
+## skill: executive_brief
+**描述：**  
+為高階主管撰寫簡潔的狀況簡報。
+
+**指令：**  
+- 第一段用 2–3 句話說清楚主題。  
+- 接著用 3–5 個 bullet point 說明關鍵風險與決策點。  
+- 盡量避免使用過於技術化的縮寫，或在首次出現時加以解釋。  
+
+---
+
+## skill: slide_outline
+**描述：**  
+設計簡報大綱而非完整投影片內容。
+
+**指令：**  
+- 給出 5–10 張投影片的標題與每張 3–5 個要點。  
+- 明確標示「建議圖表」的位置與類型。  
+- 若報告對象不同（技術／非技術），可提供不同版本的架構。  
+
+---
+
+## skill: note_markdown_transform
+**描述：**  
+將雜亂文字彙整為結構化 Markdown 筆記。
+
+**指令：**  
+- 使用 `#` 開始的主標題，`##`、`###` 為子標題。  
+- 將條列事項整理為 `-` 或 `1.` 開頭的清單。  
+- 保留原文關鍵術語與編號，不主動改寫關鍵內容。  
+
+---
+
+## skill: note_refine
+**描述：**  
+在不改變事實的前提下，改善筆記的清晰度與邏輯 flow。
+
+**指令：**  
+- 可以調整段落順序、合併重複內容。  
+- 用過渡句幫助讀者理解段落間關係。  
+- 避免加入新資訊或推測的內容。  
+
+---
+
+## skill: keyword_semantic_expand
+**描述：**  
+為使用者指定的關鍵字產生語義相近的詞彙清單。
+
+**指令：**  
+- 以簡單列表或 JSON 格式輸出：`{keyword: [synonyms...]}`。  
+- 包含常見縮寫、單複數與常見錯別字（若合理）。  
+- 不需長篇說明，重點在於可用來做高亮搜尋。  
+
+---
+
+## skill: entity_extraction
+**描述：**  
+從筆記或報告中擷取關鍵實體及其脈絡。
+
+**指令：**  
+- 優先擷取：醫療器材名稱、製造商、K-number、product code、事件、風險。  
+- 為每個實體附上簡短說明或原文節錄。  
+- 控制在 20 筆以內，避免過度切碎資訊。  
+
+---
+
+## skill: table_formatter
+**描述：**  
+將結構化內容以 Markdown 表格輸出。
+
+**指令：**  
+- 確保表頭與每列欄位數一致。  
+- 儘量避免在單一儲存格中放太長段落，可簡要摘要。  
+- 若資料過多，可建議切分為多張表。  
+
+---
+
+## skill: gap_analysis
+**描述：**  
+找出目前狀態與理想／合規狀態之間的差距。
+
+**指令：**  
+- 使用「目前狀態 vs. 目標狀態」的格式。  
+- 每項差距建議對應一至兩個改善行動。  
+- 若資訊不足以形成明確差距，請標示為「待確認」。  
+
+---
+
+## skill: roadmap_planning
+**描述：**  
+規劃中長期的 TPLC 或合規改進路線圖。
+
+**指令：**  
+- 區分為短期（0–6 個月）、中期（6–18 個月）、長期（18 個月以上）。  
+- 每個時程列出 3–5 個關鍵里程碑與負責角色。  
+- 注意與現有風險優先順序保持一致。  
+
+---
+
+## skill: socratic_mirror
+**描述：**  
+以提問與挑戰的方式協助使用者檢視自己的假設。
+
+**指令：**  
+- 以問題為主，而非直接給出不同結論。  
+- 指出可能的偏誤來源（樣本數、選擇偏差、觀測期間等）。  
+- 保持尊重與建設性口吻。  
+
+---
+
+## skill: sentiment_scaling
+**描述：**  
+為文字訊息標示情緒／緊急程度等級。
+
+**指令：**  
+- 建議使用等級：Panic / Urgent / Caution / Informational。  
+- 以簡短理由說明為何給出此等級。  
+- 可建議用顏色或強度條呈現。  
+
+---
+
+## skill: moodscape_design
+**描述：**  
+設計反映情緒或緊急程度的視覺「情緒地景」。
+
+**指令：**  
+- 建議如何在儀表板中用顏色、大小或位置呈現不同情緒層級。  
+- 保持醫療情境中的專業與嚴肅感，避免玩笑式表達。  
+
+---
+
+## skill: classification_explainer
+**描述：**  
+解釋 product code 與 device class 的臨床與風險意涵。
+
+**指令：**  
+- 盡可能用通俗語言解釋器材用途與風險。  
+- 若不確定某 product code 的細節，請明說不確定。  
+- 不要臆測適應症或臨床效益。  
+
+---
+
+## skill: benchmark_analysis
+**描述：**  
+比較不同製造商或產品線在回收與安全表現上的差異。
+
+**指令：**  
+- 明確說明比較基準（如每百件上市產品的回收率）。  
+- 避免使用帶有價值判斷的語氣。  
+- 建議以相對表現與改善方向為重點。  
+
+---
+
+## skill: guideline_mapping
+**描述：**  
+將觀察到的問題對應到可能相關的指導文件或標準。
+
+**指令：**  
+- 只列出「可能相關」的法規或標準編號／名稱。  
+- 鼓勵使用者自行查詢官方來源確認細節。  
+- 不要假裝擁有完整、最新的法規資料庫。  
+
+---
+
+## skill: rag_lite
+**描述：**  
+輕量級的檢索增強（RAG）策略說明。
+
+**指令：**  
+- 說明可以從哪些資料表或筆記區塊中檢索答案。  
+- 在回答問題時，簡要描述使用了哪些欄位或段落。  
+- 不需實作複雜向量搜尋，只需描述邏輯與可能步驟。  
+
+---
+
+## skill: note_context_qa
+**描述：**  
+僅以筆記內容為事實基礎進行問答。
+
+**指令：**  
+- 若問題超出筆記內容範圍，請明確說出「筆記中沒有足夠資訊」。  
+- 儘量引用原文片段來支持你的回答。  
+
+---
+
+## skill: summary_multilayer
+**描述：**  
+產出多層級的摘要版本。
+
+**指令：**  
+- 建議格式：  
+  - 一句話摘要  
+  - 一段話摘要（3–5 句）  
+  - 詳細摘要（數個小節）  
+- 對於每一層摘要，保持語氣與細節程度的一致性。  
+
+---
+
+## skill: dashboard_design
+**描述：**  
+為管理與分析設計互動式儀表板的結構。
+
+**指令：**  
+- 建議核心 KPI、主要視圖（地圖、時間線、分類樹等）。  
+- 指出哪些視圖需要過濾器（年份、分類、製造商）。  
+- 思考 TPLC 不同階段的使用者（開發、法規、上市後監測）。  
+
+---
+
+## skill: brainstorming
+**描述：**  
+快速提供多個想法或角度，供使用者進一步篩選。
+
+**指令：**  
+- 每次回覆至少提供 5–10 個想法。  
+- 清楚編號，方便參考。  
+- 不需要完全成熟的建議，只要提供啟發即可。  
