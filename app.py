@@ -1,28 +1,21 @@
 import os
-import json
+import textwrap
+import yaml
 import re
-import random
 from typing import Dict, Any, List, Optional
 
 import streamlit as st
-import yaml
-
-# Data / viz
 import pandas as pd
-import plotly.graph_objects as go
-import networkx as nx
+import plotly.express as px
 
-# External LLM SDKs
-import openai
+from openai import OpenAI
 import google.generativeai as genai
 import anthropic
 
 
-# ---------------------------
-# Constants & UI Dictionaries
-# ---------------------------
-
-DEFAULT_MAX_TOKENS = 12000
+# =========================
+# ---- GLOBAL CONSTANTS ----
+# =========================
 
 SUPPORTED_MODELS = [
     "gpt-4o-mini",
@@ -36,2055 +29,1202 @@ SUPPORTED_MODELS = [
     "grok-3-mini",
 ]
 
-PAINTER_STYLES = [
-    "Vincent van Gogh",
-    "Claude Monet",
-    "Pablo Picasso",
-    "Leonardo da Vinci",
-    "Salvador Dalí",
-    "Frida Kahlo",
-    "Edvard Munch",
-    "Gustav Klimt",
-    "Georgia O’Keeffe",
-    "Jackson Pollock",
-    "Henri Matisse",
-    "Wassily Kandinsky",
-    "Paul Cézanne",
-    "Joan Miró",
-    "Rembrandt",
-    "Caravaggio",
-    "Diego Velázquez",
-    "Marc Chagall",
-    "Roy Lichtenstein",
-    "Andy Warhol",
-]
-
-PAINTER_STYLE_PALETTES = {
-    "Vincent van Gogh": ("linear-gradient(135deg,#0f172a,#1e3a8a)", "#fbbf24"),
-    "Claude Monet": ("linear-gradient(135deg,#e0f2fe,#bae6fd)", "#0369a1"),
-    "Pablo Picasso": ("linear-gradient(135deg,#111827,#4b5563)", "#f97316"),
-    "Leonardo da Vinci": ("linear-gradient(135deg,#fef3c7,#fde68a)", "#92400e"),
-    "Salvador Dalí": ("linear-gradient(135deg,#fef2f2,#fee2e2)", "#b91c1c"),
-    "Frida Kahlo": ("linear-gradient(135deg,#fdf2f8,#fce7f3)", "#be123c"),
-    "Edvard Munch": ("linear-gradient(135deg,#111827,#7f1d1d)", "#f97316"),
-    "Gustav Klimt": ("linear-gradient(135deg,#fef3c7,#facc15)", "#b45309"),
-    "Georgia O’Keeffe": ("linear-gradient(135deg,#dcfce7,#bbf7d0)", "#166534"),
-    "Jackson Pollock": ("linear-gradient(135deg,#020617,#1f2937)", "#67e8f9"),
-    "Henri Matisse": ("linear-gradient(135deg,#eff6ff,#dbeafe)", "#1d4ed8"),
-    "Wassily Kandinsky": ("linear-gradient(135deg,#f9fafb,#e5e7eb)", "#7c3aed"),
-    "Paul Cézanne": ("linear-gradient(135deg,#fef9c3,#fef08a)", "#ca8a04"),
-    "Joan Miró": ("linear-gradient(135deg,#faf5ff,#ede9fe)", "#7e22ce"),
-    "Rembrandt": ("linear-gradient(135deg,#0f172a,#1f2937)", "#facc15"),
-    "Caravaggio": ("linear-gradient(135deg,#020617,#1f2937)", "#f97316"),
-    "Diego Velázquez": ("linear-gradient(135deg,#111827,#374151)", "#facc15"),
-    "Marc Chagall": ("linear-gradient(135deg,#eef2ff,#e0e7ff)", "#4c1d95"),
-    "Roy Lichtenstein": ("linear-gradient(135deg,#faf5ff,#fee2e2)", "#1d4ed8"),
-    "Andy Warhol": ("linear-gradient(135deg,#ecfeff,#e0f2fe)", "#e11d48"),
+MODEL_PROVIDER_MAP = {
+    "gpt-4o-mini": ("openai", "gpt-4o-mini"),
+    "gpt-4.1-mini": ("openai", "gpt-4.1-mini"),
+    "gemini-2.5-flash": ("google", "gemini-2.5-flash"),
+    "gemini-2.5-flash-lite": ("google", "gemini-2.5-flash-lite"),
+    "gemini-3-pro-preview": ("google", "gemini-3-pro-preview"),
+    "claude-3-5-sonnet-latest": ("anthropic", "claude-3-5-sonnet-latest"),
+    "claude-3-5-haiku-latest": ("anthropic", "claude-3-5-haiku-latest"),
+    "grok-4-fast-reasoning": ("grok", "grok-4-fast-reasoning"),
+    "grok-3-mini": ("grok", "grok-3-mini"),
 }
 
-LANG_EN = "en"
-LANG_ZH = "zh-TW"
+DEFAULT_MAX_TOKENS = 12000
 
-UI_TEXT = {
-    LANG_EN: {
-        "title": "Agentic AI Project Orchestrator",
-        "project_input": "Project Description / Tender Text",
-        "run_orchestrator": "Generate Project Plan",
-        "orchestrator_settings": "Orchestrator Settings",
-        "model": "Model",
-        "max_tokens": "Max tokens",
-        "system_prompt": "Orchestrator System Prompt (optional, advanced)",
-        "dashboard": "Project Dashboard",
-        "work_breakdown": "Work Breakdown",
-        "timeline": "Timeline",
-        "agent_matrix": "Agent Allocation",
-        "risk_heatmap": "Risk Heatmap",
-        "dependencies": "Dependency Graph",
-        "config": "Configuration",
-        "agents_tab": "Agents & Execution",
-        "skills_tab": "Skills",
-        "chat_tab": "Refinement / Prompt on Results",
-        "theme": "Theme",
-        "light": "Light",
-        "dark": "Dark",
+PAINTER_STYLES = {
+    "Monet Impression": {"bg": "#f5f7fb", "primary": "#2f5fb3", "accent": "#ffaf40"},
+    "Van Gogh Starry": {"bg": "#0b1736", "primary": "#ffd447", "accent": "#2aa9ff"},
+    "Picasso Cubism": {"bg": "#faf4ef", "primary": "#ff6f61", "accent": "#2e294e"},
+    "Dali Surreal": {"bg": "#fdf6e3", "primary": "#586e75", "accent": "#b58900"},
+    "Kandinsky Abstract": {"bg": "#0f0f1a", "primary": "#ffcc00", "accent": "#ff4b5c"},
+    "Matisse Cutouts": {"bg": "#fff7e6", "primary": "#004e64", "accent": "#ff6f61"},
+    "Hokusai Wave": {"bg": "#e0f4ff", "primary": "#003f5c", "accent": "#ffa600"},
+    "Frida Kahlo": {"bg": "#fff0f3", "primary": "#780000", "accent": "#c1121f"},
+    "Rothko Fields": {"bg": "#1b1b2f", "primary": "#e43f5a", "accent": "#162447"},
+    "Pollock Drips": {"bg": "#f8f9fa", "primary": "#1d3557", "accent": "#e63946"},
+    "Da Vinci Classic": {"bg": "#f5f0e6", "primary": "#3e3a36", "accent": "#b8860b"},
+    "Rembrandt Chiaroscuro": {"bg": "#121212", "primary": "#f6d365", "accent": "#fda085"},
+    "Vermeer Light": {"bg": "#f2f7ff", "primary": "#274c77", "accent": "#f4a261"},
+    "Turner Atmosphere": {"bg": "#fffaf0", "primary": "#2a4d69", "accent": "#f76c6c"},
+    "Bauhaus Minimal": {"bg": "#ffffff", "primary": "#111827", "accent": "#f59e0b"},
+    "Neo Tokyo": {"bg": "#050816", "primary": "#22d3ee", "accent": "#a855f7"},
+    "Cyber Grid": {"bg": "#020617", "primary": "#22c55e", "accent": "#e11d48"},
+    "Ink Wash": {"bg": "#f9fafb", "primary": "#111827", "accent": "#6b7280"},
+    "Fauvism Bold": {"bg": "#fff7ed", "primary": "#b91c1c", "accent": "#2563eb"},
+    "Nordic Calm": {"bg": "#f3f4f6", "primary": "#111827", "accent": "#10b981"},
+}
+
+UI_STRINGS = {
+    "en": {
+        "title": "Agentic Medical Device TPLC Dashboard",
+        "sidebar_settings": "Global Settings",
         "language": "Language",
-        "painter_style": "Painter Style",
-        "jackpot": "Jackpot!",
-        "api_section": "API Keys",
-        "api_hint": "If environment variables exist, they will be used. You only need to fill missing keys.",
-        "openai_key": "OpenAI API Key",
-        "gemini_key": "Gemini API Key",
-        "anthropic_key": "Anthropic API Key",
-        "grok_key": "Grok API Key",
-        "save_keys": "Save keys to session",
-        "plan_missing": "No project plan yet. Please generate it first.",
-        "run_agent": "Run this agent",
-        "agent_input": "Agent input / task context",
-        "agent_result_view": "Result view",
-        "text_view": "Plain text",
-        "markdown_view": "Markdown",
-        "shared_handoff": "Shared Agent Handoff Buffer",
-        "use_last_output": "Use last agent output in handoff buffer",
-        "refresh_config": "Reload agents.yaml & SKILL.md",
-        "wow_status": "WOW Status",
-        "wow_agents": "Agents loaded",
-        "wow_workitems": "Work items",
-        "wow_risks": "Identified risks",
-        "wow_ready": "Ready to orchestrate",
-        "chat_prompt": "Refinement prompt (Prompt on Results)",
-        "run_refinement": "Run refinement",
-        "apply_refinement": "Apply refined fragment to plan",
-        "nodes_label": "Nodes are work items; arrows show dependencies.",
-
-        # New – supply chain tab
-        "supply_tab": "Medical Supply Chain",
-        "supply_intro": "Upload, preview, modify and analyze medical device tracking records (supplier packing list & hospital incoming list).",
-        "supplier_dataset": "Supplier Packing List",
-        "hospital_dataset": "Hospital Incoming List",
-        "upload_supplier": "Upload supplier packing list (CSV or JSON)",
-        "upload_hospital": "Upload hospital incoming list (CSV or JSON)",
-        "download_supplier_csv": "Download supplier data (CSV)",
-        "download_supplier_json": "Download supplier data (JSON)",
-        "download_hospital_csv": "Download hospital data (CSV)",
-        "download_hospital_json": "Download hospital data (JSON)",
-        "reset_to_mock": "Reset to mock sample dataset",
-        "supply_datasets_section": "Datasets – Medical Device Tracking",
-        "supply_summary_section": "AI Summary & Markdown Report (1000–2000 words)",
-        "summary_language": "Summary language",
-        "summary_run": "Generate supply chain summary",
-        "summary_words_hint": "The summary will be 1000–2000 words and include 5 graphs described in markdown.",
-        "summary_latest": "Latest supply chain summary (editable markdown):",
-        "graph_section": "Interactive Supply Chain Network",
-        "graph_hint": "Suppliers and hospitals are visualized as a network. Hover nodes/edges to explore flows.",
-        "min_shipments": "Minimum total quantity per supplier-hospital link",
-        "filter_device": "Filter by device ID (optional)",
-        "no_graph_data": "Not enough columns to build a supply chain graph. Expect at least 'supplier_name' and 'hospital_name'.",
-        "supply_metrics": "Supply Chain WOW",
-        "metric_suppliers": "Suppliers",
-        "metric_hospitals": "Hospitals",
-        "metric_shipments": "Supplier records",
-        "metric_receipts": "Hospital receipts",
-
-        "data_chat_section": "Prompt on Datasets (Ad‑hoc Questions)",
-        "data_chat_prompt": "Ask anything about the current supplier & hospital datasets.",
-        "data_chat_run": "Ask AI about datasets",
-        "data_agent_section": "Run Agents from agents.yaml on Datasets",
-        "data_agent_select": "Select agent",
-        "data_agent_run": "Run selected agent on datasets",
-        "data_prompt_with_context": "Additional instructions / focus for this run",
+        "theme": "Theme",
+        "theme_light": "Light",
+        "theme_dark": "Dark",
+        "style": "Visual Style (Famous Painters)",
+        "style_jackpot": "Jackpot Style",
+        "api_keys": "API Keys & Status",
+        "openai_status": "OpenAI",
+        "gemini_status": "Gemini",
+        "anthropic_status": "Anthropic",
+        "grok_status": "Grok",
+        "enter_api_key": "Enter API Key",
+        "dashboard_tab": "WOW Dashboard",
+        "agent_lab_tab": "Agent Lab",
+        "note_keeper_tab": "AI Note Keeper",
+        "config_tab": "Configuration",
+        "data_manager": "Data Manager",
+        "upload_gudid": "Upload GUDID CSV",
+        "upload_510k": "Upload 510(k) CSV",
+        "upload_classification": "Upload Classification CSV",
+        "upload_safety": "Upload Safety Notice CSV",
+        "upload_recall": "Upload Recall CSV",
+        "wow_indicators": "WOW Status Indicators",
+        "total_recalls": "Total Active Recalls",
+        "avg_days_clearance": "Avg Days to Clearance",
+        "high_risk_devices": "High-Risk Device Count",
+        "agents": "Agents",
+        "select_agent": "Select Agent",
+        "agent_system_prompt": "Agent System Prompt (session editable)",
+        "agent_model": "Model",
+        "agent_temperature": "Temperature",
+        "agent_max_tokens": "Max Tokens",
+        "agent_user_prompt": "User Prompt / Query",
+        "run_agent": "Run Agent",
+        "agent_pipeline": "Agent Pipeline (Sequential Execution)",
+        "use_as_next": "Use as Input to Next Agent",
+        "view_mode": "View Mode",
+        "view_text": "Text",
+        "view_markdown": "Markdown",
+        "note_input": "Paste / Type Your Note",
+        "note_markdown": "Transformed Markdown",
+        "transform_to_md": "Transform to Markdown",
+        "edit_md_source": "Edit Markdown Source",
+        "ai_formatting": "AI Formatting",
+        "ai_keywords": "AI Keywords",
+        "keywords_label": "Keywords (comma-separated)",
+        "keyword_color": "Keyword Highlight Color",
+        "apply_keywords": "Apply Keyword Highlight",
+        "ai_entities": "AI Entities (20 with context)",
+        "generate_entities": "Generate Entity Table",
+        "ai_chat": "AI Chat (on Note)",
+        "chat_prompt": "Chat Prompt",
+        "ai_summary": "AI Summary",
+        "summary_prompt": "Summary Prompt",
+        "ai_magics": "AI Magics",
+        "magic_1": "AI Risk Scenarist",
+        "magic_2": "AI Regulatory Checklist",
+        "config_agents": "agents.yaml Editor",
+        "config_skills": "SKILL.md Editor",
+        "save_config": "Apply to Session",
+        "download": "Download",
+        "upload": "Upload",
+        "api_connected": "Connected",
+        "api_missing": "Missing",
     },
-    LANG_ZH: {
-        "title": "智慧代理專案協調器",
-        "project_input": "專案說明 / 標案文字",
-        "run_orchestrator": "產生專案計畫",
-        "orchestrator_settings": "協調器設定",
-        "model": "模型",
-        "max_tokens": "最大 token 數",
-        "system_prompt": "協調器系統提示（選填，高階設定）",
-        "dashboard": "專案儀表板",
-        "work_breakdown": "工作分解結構",
-        "timeline": "時程規劃",
-        "agent_matrix": "代理與資源配置",
-        "risk_heatmap": "風險熱度圖",
-        "dependencies": "相依關係圖",
-        "config": "設定",
-        "agents_tab": "代理與執行",
-        "skills_tab": "技能",
-        "chat_tab": "優化 / 結果再提示",
-        "theme": "主題",
-        "light": "亮色",
-        "dark": "暗色",
-        "language": "語言",
-        "painter_style": "畫家風格",
-        "jackpot": "隨機大補帖",
-        "api_section": "API 金鑰",
-        "api_hint": "若已設定環境變數，將自動使用。僅需填寫缺少的金鑰即可。",
-        "openai_key": "OpenAI API 金鑰",
-        "gemini_key": "Gemini API 金鑰",
-        "anthropic_key": "Anthropic API 金鑰",
-        "grok_key": "Grok API 金鑰",
-        "save_keys": "儲存金鑰到本次工作階段",
-        "plan_missing": "目前尚未有專案計畫，請先執行協調器。",
-        "run_agent": "執行此代理",
-        "agent_input": "代理輸入 / 任務內容",
-        "agent_result_view": "結果檢視模式",
-        "text_view": "純文字",
-        "markdown_view": "Markdown",
-        "shared_handoff": "代理交辦共用緩衝區",
-        "use_last_output": "以上一個代理輸出更新交辦內容",
-        "refresh_config": "重新載入 agents.yaml 與 SKILL.md",
-        "wow_status": "WOW 狀態指標",
-        "wow_agents": "已載入代理數",
-        "wow_workitems": "工作項目數",
-        "wow_risks": "風險項目數",
-        "wow_ready": "可開始協調",
-        "chat_prompt": "優化提示（針對目前結果進一步要求）",
-        "run_refinement": "執行優化",
-        "apply_refinement": "套用優化片段至計畫",
-        "nodes_label": "節點為工作項目，箭頭為相依關係。",
-
-        # New – supply chain tab
-        "supply_tab": "醫療器材供應鏈",
-        "supply_intro": "上傳、預覽、修改與分析醫療器材追蹤紀錄（供應商裝箱單與醫院入庫清單）。",
-        "supplier_dataset": "供應商裝箱單",
-        "hospital_dataset": "醫院入庫清單",
-        "upload_supplier": "上傳供應商裝箱單（CSV 或 JSON）",
-        "upload_hospital": "上傳醫院入庫清單（CSV 或 JSON）",
-        "download_supplier_csv": "下載供應商資料（CSV）",
-        "download_supplier_json": "下載供應商資料（JSON）",
-        "download_hospital_csv": "下載醫院資料（CSV）",
-        "download_hospital_json": "下載醫院資料（JSON）",
-        "reset_to_mock": "重置為預設範例資料",
-        "supply_datasets_section": "資料集 – 醫療器材追蹤",
-        "supply_summary_section": "AI 摘要與 Markdown 報告（1000–2000 字）",
-        "summary_language": "摘要語言",
-        "summary_run": "產生供應鏈摘要",
-        "summary_words_hint": "摘要將以 1000–2000 字撰寫，並包含 5 個以 Markdown 描述的圖表。",
-        "summary_latest": "最新供應鏈摘要（可編輯的 Markdown）：",
-        "graph_section": "互動式供應鏈關係圖",
-        "graph_hint": "以網路圖呈現供應商與醫院關係，游標移動可檢視細節。",
-        "min_shipments": "每一供應商–醫院連線的最小總數量",
-        "filter_device": "依裝置編號過濾（選填）",
-        "no_graph_data": "目前欄位不足以建立供應鏈關係圖，預期至少包含「supplier_name」與「hospital_name」。",
-        "supply_metrics": "供應鏈 WOW",
-        "metric_suppliers": "供應商數",
-        "metric_hospitals": "醫院數",
-        "metric_shipments": "供應商紀錄數",
-        "metric_receipts": "醫院入庫紀錄數",
-
-        "data_chat_section": "針對資料集提問（即時 QA）",
-        "data_chat_prompt": "請就目前的供應商與醫院資料提問。",
-        "data_chat_run": "詢問 AI 關於資料集的問題",
-        "data_agent_section": "在資料集上執行 agents.yaml 中的代理",
-        "data_agent_select": "選擇代理",
-        "data_agent_run": "在資料集上執行所選代理",
-        "data_prompt_with_context": "本次執行的額外說明 / 聚焦重點",
+    "zh": {
+        "title": "代理式醫療器材 TPLC 儀表板",
+        "sidebar_settings": "全域設定",
+        "language": "介面語言",
+        "theme": "主題模式",
+        "theme_light": "亮色",
+        "theme_dark": "暗色",
+        "style": "視覺風格（名畫家主題）",
+        "style_jackpot": "風格 Jackpot",
+        "api_keys": "API 金鑰與狀態",
+        "openai_status": "OpenAI 狀態",
+        "gemini_status": "Gemini 狀態",
+        "anthropic_status": "Anthropic 狀態",
+        "grok_status": "Grok 狀態",
+        "enter_api_key": "輸入 API 金鑰",
+        "dashboard_tab": "WOW 儀表板",
+        "agent_lab_tab": "代理實驗室",
+        "note_keeper_tab": "AI 筆記管家",
+        "config_tab": "組態管理",
+        "data_manager": "資料管理",
+        "upload_gudid": "上傳 GUDID CSV",
+        "upload_510k": "上傳 510(k) CSV",
+        "upload_classification": "上傳分類代碼 CSV",
+        "upload_safety": "上傳安全公告 CSV",
+        "upload_recall": "上傳回收列表 CSV",
+        "wow_indicators": "WOW 狀態指標",
+        "total_recalls": "有效回收案件數",
+        "avg_days_clearance": "平均核准天數",
+        "high_risk_devices": "高風險醫材數量",
+        "agents": "代理人",
+        "select_agent": "選擇代理",
+        "agent_system_prompt": "代理系統提示（本次工作階段可編輯）",
+        "agent_model": "模型",
+        "agent_temperature": "溫度",
+        "agent_max_tokens": "最大 Token 數",
+        "agent_user_prompt": "使用者提問／任務說明",
+        "run_agent": "執行代理",
+        "agent_pipeline": "代理流水線（逐一執行）",
+        "use_as_next": "作為下一個代理輸入",
+        "view_mode": "檢視模式",
+        "view_text": "純文字",
+        "view_markdown": "Markdown",
+        "note_input": "貼上／輸入原始筆記",
+        "note_markdown": "轉換後 Markdown",
+        "transform_to_md": "轉換為 Markdown",
+        "edit_md_source": "編輯 Markdown 原始碼",
+        "ai_formatting": "AI 格式優化",
+        "ai_keywords": "AI 關鍵字標色",
+        "keywords_label": "關鍵字（以逗號分隔）",
+        "keyword_color": "關鍵字顏色",
+        "apply_keywords": "套用關鍵字標註",
+        "ai_entities": "AI 實體萃取（20 個含脈絡）",
+        "generate_entities": "產生實體表格",
+        "ai_chat": "AI 對話（針對筆記內容）",
+        "chat_prompt": "對話提示",
+        "ai_summary": "AI 摘要",
+        "summary_prompt": "摘要提示",
+        "ai_magics": "AI Magics",
+        "magic_1": "AI 風險情境設計師",
+        "magic_2": "AI 法規檢查清單",
+        "config_agents": "agents.yaml 編輯器",
+        "config_skills": "SKILL.md 編輯器",
+        "save_config": "套用至本次工作階段",
+        "download": "下載",
+        "upload": "上傳",
+        "api_connected": "已連線",
+        "api_missing": "尚未設定",
     },
 }
 
 
-# -------------------------------------------
-# Mock datasets for medical device tracking
-# -------------------------------------------
+# =========================
+# ---- HELPERS & STATE ----
+# =========================
 
-def create_mock_supplier_df() -> pd.DataFrame:
-    data = [
-        {
-            "shipment_id": "SHP-1001",
-            "supplier_name": "Global MedTech Ltd.",
-            "hospital_code": "H001",
-            "hospital_name": "City General Hospital",
-            "device_id": "DEV-VENT-01",
-            "device_name": "ICU Ventilator X100",
-            "lot_number": "LOT-A1",
-            "expiry_date": "2027-03-31",
-            "ship_date": "2026-01-03",
-            "quantity": 10,
-            "uom": "units",
-            "po_number": "PO-9001",
-        },
-        {
-            "shipment_id": "SHP-1002",
-            "supplier_name": "Global MedTech Ltd.",
-            "hospital_code": "H001",
-            "hospital_name": "City General Hospital",
-            "device_id": "DEV-PUMP-02",
-            "device_name": "Infusion Pump Pro",
-            "lot_number": "LOT-B2",
-            "expiry_date": "2026-11-30",
-            "ship_date": "2026-01-05",
-            "quantity": 25,
-            "uom": "units",
-            "po_number": "PO-9002",
-        },
-        {
-            "shipment_id": "SHP-1003",
-            "supplier_name": "Precision Devices Corp.",
-            "hospital_code": "H002",
-            "hospital_name": "St. Mary Cardiac Center",
-            "device_id": "DEV-STENT-03",
-            "device_name": "Coronary Stent Alpha",
-            "lot_number": "LOT-C3",
-            "expiry_date": "2028-05-15",
-            "ship_date": "2026-01-07",
-            "quantity": 40,
-            "uom": "units",
-            "po_number": "PO-9100",
-        },
-        {
-            "shipment_id": "SHP-1004",
-            "supplier_name": "Precision Devices Corp.",
-            "hospital_code": "H003",
-            "hospital_name": "Metro Children’s Hospital",
-            "device_id": "DEV-VENT-01",
-            "device_name": "ICU Ventilator X100",
-            "lot_number": "LOT-A1",
-            "expiry_date": "2027-03-31",
-            "ship_date": "2026-01-08",
-            "quantity": 6,
-            "uom": "units",
-            "po_number": "PO-9101",
-        },
-        {
-            "shipment_id": "SHP-1005",
-            "supplier_name": "SterileCare Supplies",
-            "hospital_code": "H001",
-            "hospital_name": "City General Hospital",
-            "device_id": "DEV-CATH-04",
-            "device_name": "Central Venous Catheter",
-            "lot_number": "LOT-D4",
-            "expiry_date": "2026-09-30",
-            "ship_date": "2026-01-09",
-            "quantity": 120,
-            "uom": "units",
-            "po_number": "PO-9200",
-        },
-    ]
-    return pd.DataFrame(data)
+def t(key: str) -> str:
+    lang = st.session_state.get("lang", "en")
+    return UI_STRINGS.get(lang, UI_STRINGS["en"]).get(key, key)
 
-
-def create_mock_hospital_df() -> pd.DataFrame:
-    data = [
-        {
-            "receipt_id": "RCV-5001",
-            "linked_shipment_id": "SHP-1001",
-            "hospital_code": "H001",
-            "hospital_name": "City General Hospital",
-            "device_id": "DEV-VENT-01",
-            "device_name": "ICU Ventilator X100",
-            "lot_number": "LOT-A1",
-            "expiry_date": "2027-03-31",
-            "received_date": "2026-01-04",
-            "quantity": 10,
-            "status": "accepted",
-        },
-        {
-            "receipt_id": "RCV-5002",
-            "linked_shipment_id": "SHP-1002",
-            "hospital_code": "H001",
-            "hospital_name": "City General Hospital",
-            "device_id": "DEV-PUMP-02",
-            "device_name": "Infusion Pump Pro",
-            "lot_number": "LOT-B2",
-            "expiry_date": "2026-11-30",
-            "received_date": "2026-01-06",
-            "quantity": 25,
-            "status": "accepted",
-        },
-        {
-            "receipt_id": "RCV-5003",
-            "linked_shipment_id": "SHP-1003",
-            "hospital_code": "H002",
-            "hospital_name": "St. Mary Cardiac Center",
-            "device_id": "DEV-STENT-03",
-            "device_name": "Coronary Stent Alpha",
-            "lot_number": "LOT-C3",
-            "expiry_date": "2028-05-15",
-            "received_date": "2026-01-09",
-            "quantity": 38,
-            "status": "accepted_with_variance",
-        },
-        {
-            "receipt_id": "RCV-5004",
-            "linked_shipment_id": "SHP-1004",
-            "hospital_code": "H003",
-            "hospital_name": "Metro Children’s Hospital",
-            "device_id": "DEV-VENT-01",
-            "device_name": "ICU Ventilator X100",
-            "lot_number": "LOT-A1",
-            "expiry_date": "2027-03-31",
-            "received_date": "2026-01-10",
-            "quantity": 6,
-            "status": "accepted",
-        },
-        {
-            "receipt_id": "RCV-5005",
-            "linked_shipment_id": None,
-            "hospital_code": "H001",
-            "hospital_name": "City General Hospital",
-            "device_id": "DEV-CATH-04",
-            "device_name": "Central Venous Catheter",
-            "lot_number": "LOT-D4",
-            "expiry_date": "2026-09-30",
-            "received_date": "2026-01-11",
-            "quantity": 115,
-            "status": "pending_investigation",
-        },
-    ]
-    return pd.DataFrame(data)
-
-
-# -------------------------------------------
-# Session State Initialization & Theme / Lang
-# -------------------------------------------
 
 def init_session_state():
-    if "theme" not in st.session_state:
-        st.session_state["theme"] = "dark"
     if "lang" not in st.session_state:
-        st.session_state["lang"] = LANG_EN
-    if "painter_style" not in st.session_state:
-        st.session_state["painter_style"] = PAINTER_STYLES[0]
-    if "api_keys" not in st.session_state:
-        st.session_state["api_keys"] = {
-            "openai": None,
-            "gemini": None,
-            "anthropic": None,
-            "grok": None,
-        }
+        st.session_state["lang"] = "en"
+    if "theme_mode" not in st.session_state:
+        st.session_state["theme_mode"] = "light"
+    if "style_name" not in st.session_state:
+        st.session_state["style_name"] = list(PAINTER_STYLES.keys())[0]
     if "agents_config" not in st.session_state:
-        st.session_state["agents_config"] = {"agents": []}
-    if "skills" not in st.session_state:
-        st.session_state["skills"] = {}
-    if "project_plan" not in st.session_state:
-        st.session_state["project_plan"] = None
-    if "last_agent_output" not in st.session_state:
-        st.session_state["last_agent_output"] = ""
-    if "handoff_buffer" not in st.session_state:
-        st.session_state["handoff_buffer"] = ""
-    if "refined_fragment" not in st.session_state:
-        st.session_state["refined_fragment"] = ""
-    if "orchestrator_settings" not in st.session_state:
-        st.session_state["orchestrator_settings"] = {
-            "model": SUPPORTED_MODELS[0],
-            "max_tokens": DEFAULT_MAX_TOKENS,
-            "system_prompt": "",
-        }
-
-    # New: datasets & analysis state
-    if "supplier_df" not in st.session_state:
-        st.session_state["supplier_df"] = create_mock_supplier_df()
-    if "hospital_df" not in st.session_state:
-        st.session_state["hospital_df"] = create_mock_hospital_df()
-    if "supply_summary_md" not in st.session_state:
-        st.session_state["supply_summary_md"] = ""
-    if "data_chat_output" not in st.session_state:
-        st.session_state["data_chat_output"] = ""
+        st.session_state["agents_config"] = load_agents_yaml()
+    if "skills_text" not in st.session_state:
+        st.session_state["skills_text"] = load_skills_markdown()
+    if "skills_map" not in st.session_state:
+        st.session_state["skills_map"] = parse_skills(st.session_state["skills_text"])
+    if "llm_orchestrator" not in st.session_state:
+        st.session_state["llm_orchestrator"] = LLMOrchestrator()
+    if "data_manager" not in st.session_state:
+        st.session_state["data_manager"] = DataManager()
+    if "agent_pipeline" not in st.session_state:
+        st.session_state["agent_pipeline"] = []
+    if "note_raw" not in st.session_state:
+        st.session_state["note_raw"] = ""
+    if "note_md" not in st.session_state:
+        st.session_state["note_md"] = ""
+    if "note_md_edit_mode" not in st.session_state:
+        st.session_state["note_md_edit_mode"] = False
+    if "openai_key_ui" not in st.session_state:
+        st.session_state["openai_key_ui"] = ""
+    if "gemini_key_ui" not in st.session_state:
+        st.session_state["gemini_key_ui"] = ""
+    if "anthropic_key_ui" not in st.session_state:
+        st.session_state["anthropic_key_ui"] = ""
+    if "grok_key_ui" not in st.session_state:
+        st.session_state["grok_key_ui"] = ""
 
 
-def get_ui_text() -> Dict[str, str]:
-    return UI_TEXT.get(st.session_state["lang"], UI_TEXT[LANG_EN])
+def apply_theme():
+    style_name = st.session_state.get("style_name", list(PAINTER_STYLES.keys())[0])
+    palette = PAINTER_STYLES.get(style_name, list(PAINTER_STYLES.values())[0])
+    bg = palette["bg"]
+    primary = palette["primary"]
+    accent = palette["accent"]
+
+    base_text = "#111827" if st.session_state.get("theme_mode") == "light" else "#e5e7eb"
+    card_bg = "rgba(255,255,255,0.85)" if st.session_state.get("theme_mode") == "light" else "rgba(17,24,39,0.9)"
+
+    css = f"""
+    <style>
+    .stApp {{
+        background: {bg};
+        color: {base_text};
+    }}
+    .wow-card {{
+        background: {card_bg};
+        border-radius: 1rem;
+        padding: 1rem 1.3rem;
+        border: 1px solid rgba(148,163,184,0.4);
+        box-shadow: 0 12px 30px rgba(15,23,42,0.15);
+    }}
+    .wow-metric-label {{
+        font-size: 0.85rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }}
+    .wow-metric-value {{
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: {primary};
+    }}
+    .wow-badge {{
+        display: inline-flex;
+        align-items: center;
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        margin-left: 0.3rem;
+        background: {accent}20;
+        color: {accent};
+        border: 1px solid {accent}40;
+    }}
+    .wow-dot-green {{
+        height: 0.6rem;
+        width: 0.6rem;
+        border-radius: 999px;
+        background: #22c55e;
+        margin-right: 0.25rem;
+    }}
+    .wow-dot-red {{
+        height: 0.6rem;
+        width: 0.6rem;
+        border-radius: 999px;
+        background: #ef4444;
+        margin-right: 0.25rem;
+    }}
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
 
-def apply_custom_theme():
-    style_name = st.session_state.get("painter_style", PAINTER_STYLES[0])
-    bg, accent = PAINTER_STYLE_PALETTES.get(
-        style_name,
-        ("linear-gradient(135deg,#020617,#1f2937)", "#3b82f6"),
-    )
-    is_dark = st.session_state.get("theme", "dark") == "dark"
+# =======================
+# ---- DATA MANAGER  ----
+# =======================
 
-    text_color = "#e5e7eb" if is_dark else "#111827"
-    card_bg = "rgba(15,23,42,0.85)" if is_dark else "rgba(255,255,255,0.9)"
-    border_color = "rgba(148,163,184,0.4)" if is_dark else "rgba(148,163,184,0.6)"
+class DataManager:
+    def __init__(self):
+        self.df_510k, self.df_gudid, self.df_class, self.df_safety, self.df_recall = self._create_mock_datasets()
+        self.df_master = self._build_master_view()
 
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background: {bg} !important;
-            color: {text_color} !important;
-        }}
-        .wow-card {{
-            background: {card_bg};
-            border-radius: 16px;
-            padding: 1.1rem 1.25rem;
-            border: 1px solid {border_color};
-            box-shadow: 0 18px 45px rgba(15,23,42,0.6);
-            backdrop-filter: blur(16px);
-        }}
-        .wow-title {{
-            font-size: 1.8rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            color: {accent};
-        }}
-        .wow-pill {{
-            display: inline-flex;
-            align-items: center;
-            padding: 0.25rem 0.7rem;
-            border-radius: 999px;
-            border: 1px solid {border_color};
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            color: {text_color};
-        }}
-        .wow-label {{
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            opacity: 0.7;
-        }}
-        .wow-value {{
-            font-size: 1.3rem;
-            font-weight: 600;
-        }}
-        .wow-accent {{
-            color: {accent};
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    def _create_mock_datasets(self):
+        # Mock 510(k)
+        df_510k = pd.DataFrame([
+            {"k_number": "K240001", "device_name": "CardioFlow Stent", "applicant": "Alpha Cardio Inc.",
+             "product_code": "MNA", "decision_date": "2024-01-15", "device_class": "II", "specialty": "Cardiovascular"},
+            {"k_number": "K240050", "device_name": "OrthoFlex Knee System", "applicant": "Beta Ortho Corp.",
+             "product_code": "JWH", "decision_date": "2024-03-22", "device_class": "II", "specialty": "Orthopedic"},
+            {"k_number": "K230900", "device_name": "NeuroWave Stimulator", "applicant": "NeuroX Ltd.",
+             "product_code": "GZB", "decision_date": "2023-11-10", "device_class": "III", "specialty": "Neurology"},
+        ])
+        # Mock GUDID
+        df_gudid = pd.DataFrame([
+            {"primary_di": "00812345000011", "public_device_record_key": "GUDID001",
+             "device_description": "CardioFlow Stent 3.0mm", "company_name": "Alpha Cardio Inc.",
+             "gmdn_code": "47915", "k_number": "K240001"},
+            {"primary_di": "00812345000022", "public_device_record_key": "GUDID002",
+             "device_description": "OrthoFlex Knee Femoral Component", "company_name": "Beta Ortho Corp.",
+             "gmdn_code": "37822", "k_number": "K240050"},
+        ])
+        # Mock Classification
+        df_class = pd.DataFrame([
+            {"product_code": "MNA", "device_class": "II", "specialty": "Cardiovascular",
+             "device_definition": "Coronary stent system"},
+            {"product_code": "JWH", "device_class": "II", "specialty": "Orthopedic",
+             "device_definition": "Knee joint prosthesis"},
+            {"product_code": "GZB", "device_class": "III", "specialty": "Neurology",
+             "device_definition": "Neurostimulation system"},
+        ])
+        # Mock Safety Notices
+        df_safety = pd.DataFrame([
+            {"notice_id": "SN2024-001", "k_number": "K240001", "severity": "Urgent",
+             "summary": "Potential fracture of stent struts in certain lots.",
+             "date": "2024-06-10"},
+            {"notice_id": "SN2023-015", "k_number": "K230900", "severity": "Routine",
+             "summary": "Updated instructions for MRI safety labeling.",
+             "date": "2023-12-05"},
+        ])
+        # Mock Recalls
+        df_recall = pd.DataFrame([
+            {"res_event_number": "RE2024-1001", "k_number": "K240001",
+             "root_cause_text": "Material fatigue leading to stent fracture.",
+             "classification": "Class II", "distribution_pattern": "US Nationwide",
+             "year": 2024},
+            {"res_event_number": "RE2023-2001", "k_number": "K230900",
+             "root_cause_text": "Software error may lead to overstimulation.",
+             "classification": "Class I", "distribution_pattern": "US & EU", "year": 2023},
+        ])
+        # parse dates
+        df_510k["decision_date"] = pd.to_datetime(df_510k["decision_date"])
+        df_safety["date"] = pd.to_datetime(df_safety["date"])
+        return df_510k, df_gudid, df_class, df_safety, df_recall
+
+    def _build_master_view(self):
+        df = self.df_recall.merge(self.df_510k, on="k_number", how="left", suffixes=("_recall", "_510k"))
+        df = df.merge(self.df_class[["product_code", "device_definition"]], on="product_code", how="left")
+        return df
+
+    def update_from_upload(self, kind: str, df: pd.DataFrame):
+        if kind == "510k":
+            self.df_510k = df
+        elif kind == "gudid":
+            self.df_gudid = df
+        elif kind == "class":
+            self.df_class = df
+        elif kind == "safety":
+            self.df_safety = df
+        elif kind == "recall":
+            self.df_recall = df
+        self.df_master = self._build_master_view()
+
+    def compute_indicators(self):
+        total_recalls = len(self.df_recall)
+        avg_days = None
+        if "decision_date" in self.df_510k.columns and not self.df_510k["decision_date"].isna().all():
+            # mock: days between decision and "today" proxy recall year
+            avg_days = 120
+        high_risk = len(self.df_510k[self.df_510k["device_class"] == "III"]) if "device_class" in self.df_510k else 0
+        return total_recalls, avg_days, high_risk
 
 
-# -------------------------
-# Config Loading & Parsing
-# -------------------------
+# =========================
+# ---- AGENTS & SKILLS ----
+# =========================
 
-def load_agents_config() -> Dict[str, Any]:
-    path = "agents.yaml"
-    if not os.path.exists(path):
-        return {"agents": []}
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
-    if "agents" not in cfg:
-        cfg["agents"] = []
-    return cfg
+def load_agents_yaml() -> Dict[str, Any]:
+    try:
+        with open("agents.yaml", "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return {}  # HF Space owner should provide agents.yaml
 
 
-def parse_skills_md() -> Dict[str, Dict[str, Any]]:
-    path = "SKILL.md"
-    if not os.path.exists(path):
-        return {}
+def load_skills_markdown() -> str:
+    try:
+        with open("SKILL.md", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "# Skills\n\n"
 
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
 
-    skills: Dict[str, Dict[str, Any]] = {}
-    blocks = re.split(r"^#\s*Skill:\s*", content, flags=re.MULTILINE)
-    for block in blocks[1:]:
-        lines = block.splitlines()
-        if not lines:
-            continue
-        first_line = lines[0].strip()
-        skill_id = first_line
-        rest = "\n".join(lines[1:])
-        desc_match = re.search(r"\*\*Description:\*\*\s*(.*)", rest)
-        params_match = re.search(r"\*\*Parameters:\*\*\s*(.*)", rest)
-        skills[skill_id] = {
-            "id": skill_id,
-            "description": desc_match.group(1).strip() if desc_match else "",
-            "parameters": params_match.group(1).strip() if params_match else "",
-            "raw": rest.strip(),
-        }
+def parse_skills(md_text: str) -> Dict[str, str]:
+    """
+    Parse SKILL.md into {skill_id: instruction_text}
+    Assumes sections start with '## skill: <id>'
+    """
+    skills = {}
+    current_id = None
+    buffer: List[str] = []
+    for line in md_text.splitlines():
+        m = re.match(r"^##\s+skill:\s*([A-Za-z0-9_\-]+)", line.strip())
+        if m:
+            if current_id:
+                skills[current_id] = "\n".join(buffer).strip()
+                buffer = []
+            current_id = m.group(1).strip()
+        else:
+            if current_id:
+                buffer.append(line)
+    if current_id:
+        skills[current_id] = "\n".join(buffer).strip()
     return skills
 
 
-def refresh_config():
-    st.session_state["agents_config"] = load_agents_config()
-    st.session_state["skills"] = parse_skills_md()
+def build_agent_prompt(agent_key: str,
+                       agents_cfg: Dict[str, Any],
+                       skills_map: Dict[str, str],
+                       system_override: Optional[str] = None,
+                       extra_instruction: str = "") -> str:
+    agent_cfg = agents_cfg.get(agent_key, {})
+    base_system = system_override or agent_cfg.get("system_prompt", "")
+    skill_ids = agent_cfg.get("skills", []) or []
+    skill_texts = []
+    for sid in skill_ids:
+        if sid in skills_map:
+            skill_texts.append(f"[skill: {sid}]\n{skills_map[sid]}")
+    full = base_system.strip() + "\n\n" + "\n\n".join(skill_texts).strip()
+    if extra_instruction:
+        full += "\n\n[session instruction]\n" + extra_instruction.strip()
+    return full.strip()
 
 
-# ----------------------------
-# API Keys & LLM Client Helper
-# ----------------------------
+# =========================
+# ---- LLM ORCHESTRATOR ---
+# =========================
 
-def init_api_keys_from_env():
-    keys = st.session_state["api_keys"]
-    if keys["openai"] is None:
-        env_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_APIKEY")
-        if env_key:
-            keys["openai"] = env_key
-    if keys["gemini"] is None:
-        env_key = os.getenv("GEMINI_API_KEY")
-        if env_key:
-            keys["gemini"] = env_key
-    if keys["anthropic"] is None:
-        env_key = os.getenv("ANTHROPIC_API_KEY")
-        if env_key:
-            keys["anthropic"] = env_key
-    if keys["grok"] is None:
-        env_key = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY")
-        if env_key:
-            keys["grok"] = env_key
-    st.session_state["api_keys"] = keys
+class LLMOrchestrator:
+    def __init__(self):
+        self._openai_clients: Dict[str, OpenAI] = {}
+        self._anthropic_clients: Dict[str, anthropic.Anthropic] = {}
+        self._gemini_configured_keys: Dict[str, bool] = {}
 
+    # ---- API key resolution ----
+    def _get_openai_client(self):
+        key = os.getenv("OPENAI_API_KEY") or st.session_state.get("openai_key_ui")
+        if not key:
+            raise RuntimeError("Missing OpenAI API key")
+        if key not in self._openai_clients:
+            self._openai_clients[key] = OpenAI(api_key=key)
+        return self._openai_clients[key]
 
-def detect_provider(model_name: str) -> str:
-    mn = model_name.lower()
-    if mn.startswith("gpt-"):
-        return "openai"
-    if mn.startswith("gemini-"):
-        return "gemini"
-    if mn.startswith("claude-") or "sonnet" in mn or "haiku" in mn or "anthropic" in mn:
-        return "anthropic"
-    if mn.startswith("grok-"):
-        return "grok"
-    return "openai"
+    def _ensure_gemini(self):
+        key = os.getenv("GEMINI_API_KEY") or st.session_state.get("gemini_key_ui")
+        if not key:
+            raise RuntimeError("Missing Gemini API key")
+        if key not in self._gemini_configured_keys:
+            genai.configure(api_key=key)
+            self._gemini_configured_keys[key] = True
+        return key
 
+    def _get_anthropic_client(self):
+        key = os.getenv("ANTHROPIC_API_KEY") or st.session_state.get("anthropic_key_ui")
+        if not key:
+            raise RuntimeError("Missing Anthropic API key")
+        if key not in self._anthropic_clients:
+            self._anthropic_clients[key] = anthropic.Anthropic(api_key=key)
+        return self._anthropic_clients[key]
 
-def call_llm(
-    model: str,
-    system_prompt: str,
-    user_prompt: str,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
-) -> str:
-    provider = detect_provider(model)
-    keys = st.session_state["api_keys"]
+    # ---- Public entry point ----
+    def call_llm(self,
+                 model: str,
+                 system_prompt: str,
+                 user_prompt: str,
+                 max_tokens: int = DEFAULT_MAX_TOKENS,
+                 temperature: float = 0.2) -> str:
+        provider, provider_model = MODEL_PROVIDER_MAP[model]
+        if provider == "openai":
+            return self._call_openai(provider_model, system_prompt, user_prompt, max_tokens, temperature)
+        elif provider == "google":
+            return self._call_gemini(provider_model, system_prompt, user_prompt, max_tokens, temperature)
+        elif provider == "anthropic":
+            return self._call_anthropic(provider_model, system_prompt, user_prompt, max_tokens, temperature)
+        elif provider == "grok":
+            # Placeholder: provide your own implementation for Grok / xAI
+            raise RuntimeError("Grok provider is not implemented in this demo. Please plug in your own client.")
+        else:
+            raise RuntimeError(f"Unknown provider: {provider}")
 
-    if provider == "openai":
-        api_key = keys.get("openai")
-        if not api_key:
-            raise RuntimeError("Missing OpenAI API key.")
-        client = openai.OpenAI(api_key=api_key)
+    # ---- Provider-specific calls ----
+    def _call_openai(self, model: str, system_prompt: str, user_prompt: str,
+                     max_tokens: int, temperature: float) -> str:
+        client = self._get_openai_client()
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": system_prompt or ""},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             max_tokens=max_tokens,
+            temperature=temperature,
         )
         return resp.choices[0].message.content
 
-    elif provider == "gemini":
-        api_key = keys.get("gemini")
-        if not api_key:
-            raise RuntimeError("Missing Gemini API key.")
-        genai.configure(api_key=api_key)
-        prompt = system_prompt + "\n\n" + user_prompt if system_prompt else user_prompt
-        model_obj = genai.GenerativeModel(model)
-        resp = model_obj.generate_content(prompt)
+    def _call_gemini(self, model: str, system_prompt: str, user_prompt: str,
+                     max_tokens: int, temperature: float) -> str:
+        self._ensure_gemini()
+        full_prompt = f"{system_prompt}\n\n[User]\n{user_prompt}"
+        gmodel = genai.GenerativeModel(model)
+        resp = gmodel.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+            ),
+        )
         return resp.text
 
-    elif provider == "anthropic":
-        api_key = keys.get("anthropic")
-        if not api_key:
-            raise RuntimeError("Missing Anthropic API key.")
-        client = anthropic.Anthropic(api_key=api_key)
-        resp = client.messages.create(
+    def _call_anthropic(self, model: str, system_prompt: str, user_prompt: str,
+                        max_tokens: int, temperature: float) -> str:
+        client = self._get_anthropic_client()
+        msg = client.messages.create(
             model=model,
             max_tokens=max_tokens,
-            system=system_prompt or "",
+            temperature=temperature,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        text = ""
-        for block in resp.content:
-            if getattr(block, "type", None) == "text":
-                text += block.text
-        return text
-
-    elif provider == "grok":
-        api_key = keys.get("grok")
-        if not api_key:
-            raise RuntimeError("Missing Grok API key.")
-        grok_client = openai.OpenAI(
-            api_key=api_key,
-            base_url="https://api.x.ai/v1",
-        )
-        resp = grok_client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt or ""},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=max_tokens,
-        )
-        return resp.choices[0].message.content
-
-    else:
-        raise RuntimeError(f"Unknown provider for model {model}")
+        # Concatenate text blocks
+        chunks = []
+        for c in msg.content:
+            if getattr(c, "type", None) == "text":
+                chunks.append(c.text)
+        return "\n".join(chunks)
 
 
-# ---------------------------------
-# Orchestrator Prompt & JSON Helper
-# ---------------------------------
+# =========================
+# ---- UI SECTIONS --------
+# =========================
 
-def build_orchestrator_system_prompt() -> str:
-    agents = st.session_state["agents_config"]["agents"]
-    skills = st.session_state["skills"]
+def render_sidebar():
+    st.sidebar.header(t("sidebar_settings"))
 
-    skill_summaries = []
-    for sid, s in skills.items():
-        skill_summaries.append(
-            f"- {sid}: {s.get('description','')} (params: {s.get('parameters','')})"
-        )
-    skills_block = "\n".join(skill_summaries) if skill_summaries else "None."
-
-    agent_summaries = []
-    for a in agents:
-        agent_summaries.append(
-            f"- id: {a.get('id')} | name: {a.get('name')} | role: {a.get('role')} | "
-            f"capabilities: {', '.join(a.get('capabilities', []))}"
-        )
-    agents_block = "\n".join(agent_summaries) if agent_summaries else "None."
-
-    return f"""
-You are the Orchestrator for an Agentic AI Project Planning system.
-
-You must read an unstructured project or tender description, then output a JSON object
-strictly matching the following TypeScript interface (no extra keys):
-
-interface ProjectPlan {{
-  meta: {{
-    title: string;
-    summary: string;
-    domain: string;
-  }};
-  workItems: Array<{{ 
-    id: string;
-    title: string;
-    description: string;
-    assignedAgentId: string;
-    complexity: "Low" | "Medium" | "High";
-    phase: string;
-  }}>;
-  timeline: Array<{{
-    phaseName: string;
-    startDate: string;
-    duration: string;
-    milestones: string[];
-  }}>;
-  risks: Array<{{
-    description: string;
-    impact: number;
-    probability: number;
-    mitigationStrategy: string;
-  }}>;
-  dependencies: Array<{{
-    source: string;
-    target: string;
-    type: "Blocking" | "Informational";
-  }}>;
-}}
-
-Agents available (from agents.yaml):
-{agents_block}
-
-Skills available (from SKILL.md):
-{skills_block}
-
-Rules:
-- Use assignedAgentId values that match existing agent ids when possible.
-- Ensure IDs like workItems[i].id are unique strings (e.g., "1.1", "2.3").
-- Return ONLY valid JSON. Do NOT wrap JSON in markdown fences. Do not add comments.
-"""
-
-
-def parse_json_from_llm(text: str) -> Dict[str, Any]:
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if match:
-        candidate = match.group(0)
-        try:
-            return json.loads(candidate)
-        except Exception as e:
-            raise ValueError(f"Failed to parse model output as JSON. Error: {e}")
-    raise ValueError("No JSON object found in model output.")
-
-
-# ---------------------------
-# Visualization – WOW & Views
-# ---------------------------
-
-def render_wow_status():
-    ui = get_ui_text()
-    plan = st.session_state["project_plan"]
-    agents = st.session_state["agents_config"]["agents"]
-    skills = st.session_state["skills"]
-
-    work_items_count = len(plan.get("workItems", [])) if plan else 0
-    risks_count = len(plan.get("risks", [])) if plan else 0
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">{ui["wow_agents"]}</div>
-              <div class="wow-value wow-accent">{len(agents)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with col2:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">Skills</div>
-              <div class="wow-value wow-accent">{len(skills)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with col3:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">{ui["wow_workitems"]}</div>
-              <div class="wow-value wow-accent">{work_items_count}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with col4:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">{ui["wow_risks"]}</div>
-              <div class="wow-value wow-accent">{risks_count}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-def render_supply_wow_status():
-    """Additional WOW metrics for the medical supply chain."""
-    ui = get_ui_text()
-    supplier_df: pd.DataFrame = st.session_state["supplier_df"]
-    hospital_df: pd.DataFrame = st.session_state["hospital_df"]
-
-    suppliers = supplier_df["supplier_name"].nunique() if "supplier_name" in supplier_df.columns else len(supplier_df)
-    hospitals = 0
-    if "hospital_name" in supplier_df.columns:
-        hospitals = supplier_df["hospital_name"].nunique()
-    if "hospital_name" in hospital_df.columns:
-        hospitals = max(hospitals, hospital_df["hospital_name"].nunique())
-
-    shipments = len(supplier_df)
-    receipts = len(hospital_df)
-
-    st.markdown(f"#### {ui['supply_metrics']}")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">{ui["metric_suppliers"]}</div>
-              <div class="wow-value wow-accent">{suppliers}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">{ui["metric_hospitals"]}</div>
-              <div class="wow-value wow-accent">{hospitals}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with c3:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">{ui["metric_shipments"]}</div>
-              <div class="wow-value wow-accent">{shipments}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with c4:
-        st.markdown(
-            f"""
-            <div class="wow-card">
-              <div class="wow-label">{ui["metric_receipts"]}</div>
-              <div class="wow-value wow-accent">{receipts}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-def render_work_breakdown(plan: Dict[str, Any]):
-    ui = get_ui_text()
-    st.subheader(ui["work_breakdown"])
-    work_items = plan.get("workItems", [])
-    if not work_items:
-        st.info("No work items in the plan yet.")
-        return
-
-    rows = []
-    for wi in work_items:
-        rows.append(
-            {
-                "ID": wi.get("id"),
-                "Title": wi.get("title"),
-                "Description": wi.get("description"),
-                "Agent": wi.get("assignedAgentId"),
-                "Complexity": wi.get("complexity"),
-                "Phase": wi.get("phase"),
-            }
-        )
-    st.dataframe(rows, hide_index=True, use_container_width=True)
-
-
-def render_timeline(plan: Dict[str, Any]):
-    ui = get_ui_text()
-    st.subheader(ui["timeline"])
-    timeline = plan.get("timeline", [])
-    if not timeline:
-        st.info("No timeline information available.")
-        return
-    for phase in timeline:
-        with st.expander(f"{phase.get('phaseName','(Phase)')} – {phase.get('duration','')}"):
-            st.write(f"Start: {phase.get('startDate','')}")
-            mstones = phase.get("milestones", [])
-            if mstones:
-                st.markdown("**Milestones:**")
-                for m in mstones:
-                    st.markdown(f"- {m}")
-
-
-def render_agent_matrix(plan: Dict[str, Any]):
-    ui = get_ui_text()
-    st.subheader(ui["agent_matrix"])
-    work_items = plan.get("workItems", [])
-    agents_by_id = {
-        a.get("id"): a for a in st.session_state["agents_config"]["agents"]
-    }
-
-    if not work_items:
-        st.info("No work items in the plan.")
-        return
-
-    rows = []
-    for wi in work_items:
-        agent_id = wi.get("assignedAgentId")
-        agent = agents_by_id.get(agent_id)
-        rows.append(
-            {
-                "Work Item ID": wi.get("id"),
-                "Title": wi.get("title"),
-                "Agent ID": agent_id,
-                "Agent Name": agent.get("name") if agent else "",
-                "Agent Role": agent.get("role") if agent else "",
-            }
-        )
-    st.dataframe(rows, hide_index=True, use_container_width=True)
-
-
-def render_risk_heatmap(plan: Dict[str, Any]):
-    ui = get_ui_text()
-    st.subheader(ui["risk_heatmap"])
-    risks = plan.get("risks", [])
-    if not risks:
-        st.info("No risks defined in the plan.")
-        return
-
-    cols = st.columns(3)
-    with cols[0]:
-        st.markdown("**High Impact / High Probability**")
-        for r in risks:
-            if r.get("impact", 0) >= 7 and r.get("probability", 0) >= 7:
-                st.markdown(f"- {r.get('description')}")
-    with cols[1]:
-        st.markdown("**High Impact / Medium Probability**")
-        for r in risks:
-            if r.get("impact", 0) >= 7 and 4 <= r.get("probability", 0) < 7:
-                st.markdown(f"- {r.get('description')}")
-    with cols[2]:
-        st.markdown("**Medium Impact / Low Probability**")
-        for r in risks:
-            if 4 <= r.get("impact", 0) < 7 and r.get("probability", 0) < 4:
-                st.markdown(f"- {r.get('description')}")
-
-
-def render_dependency_graph(plan: Dict[str, Any]):
-    ui = get_ui_text()
-    st.subheader(ui["dependencies"])
-    deps = plan.get("dependencies", [])
-    if not deps:
-        st.info("No dependencies defined.")
-        return
-
-    work_items = {w.get("id"): w for w in plan.get("workItems", [])}
-    nodes = []
-    edges = []
-    for wid, w in work_items.items():
-        title = w.get("title", "").replace('"', "'")
-        nodes.append(f'"{wid}" [label="{wid}: {title}"];')
-    for d in deps:
-        s = d.get("source")
-        t = d.get("target")
-        dep_type = d.get("type", "Informational")
-        if not s or not t:
-            continue
-        color = "red" if dep_type == "Blocking" else "gray"
-        edges.append(f'"{s}" -> "{t}" [color="{color}"];')
-
-    dot = "digraph G {\n" + "\n".join(nodes) + "\n" + "\n".join(edges) + "\n}"
-    st.graphviz_chart(dot)
-    st.caption(ui["nodes_label"])
-
-
-# --------------------------
-# Agent Execution / Chaining
-# --------------------------
-
-def render_agents_tab():
-    ui = get_ui_text()
-    plan = st.session_state["project_plan"]
-    agents = st.session_state["agents_config"]["agents"]
-    if not agents:
-        st.info("No agents loaded from agents.yaml.")
-        return
-
-    st.subheader(ui["agents_tab"])
-
-    st.markdown(f"**{ui['shared_handoff']}**")
-    st.text_area(
-        label="",
-        value=st.session_state["handoff_buffer"],
-        key="handoff_buffer_widget",
-        height=120,
+    # Language
+    lang = st.sidebar.selectbox(
+        t("language"),
+        options=[("en", "English"), ("zh", "繁體中文")],
+        format_func=lambda x: x[1],
+        index=1 if st.session_state["lang"] == "zh" else 0,
     )
-    st.session_state["handoff_buffer"] = st.session_state.get(
-        "handoff_buffer_widget", ""
-    )
-
-    st.markdown("---")
-
-    if not plan:
-        st.info(ui["plan_missing"])
-        return
-
-    work_items = plan.get("workItems", [])
-    if not work_items:
-        st.info("No work items to assign agents to.")
-        return
-
-    agent_to_items: Dict[str, List[Dict[str, Any]]] = {a["id"]: [] for a in agents}
-    for wi in work_items:
-        aid = wi.get("assignedAgentId")
-        if aid in agent_to_items:
-            agent_to_items[aid].append(wi)
-
-    for agent in agents:
-        aid = agent.get("id")
-        with st.expander(f"Agent: {agent.get('name')} ({aid}) – {agent.get('role')}"):
-            items = agent_to_items.get(aid, [])
-            if not items:
-                st.caption("No work items currently assigned.")
-            else:
-                for wi in items:
-                    st.markdown(f"**[{wi.get('id')}] {wi.get('title')}**")
-                    st.caption(wi.get("description", ""))
-
-                    default_input = (
-                        f"You are {agent.get('name')} with role {agent.get('role')}.\n"
-                        f"Task: {wi.get('title')} (ID: {wi.get('id')})\n"
-                        f"Description: {wi.get('description')}\n\n"
-                        f"Handoff context (if any):\n{st.session_state.get('handoff_buffer','')}\n"
-                    )
-                    user_input_key = f"agent_input_{aid}_{wi.get('id')}"
-                    agent_input = st.text_area(
-                        ui["agent_input"],
-                        value=default_input,
-                        key=user_input_key,
-                        height=160,
-                    )
-
-                    col_run, col_view = st.columns([1, 1])
-                    with col_run:
-                        btn_key = f"run_{aid}_{wi.get('id')}"
-                        if st.button(ui["run_agent"], key=btn_key):
-                            try:
-                                # Allow override by orchestrator settings if agent.model not set
-                                model = agent.get("model") or st.session_state[
-                                    "orchestrator_settings"
-                                ]["model"]
-                                max_tokens = st.session_state["orchestrator_settings"][
-                                    "max_tokens"
-                                ]
-                                system_prompt = agent.get("system_prompt", "")
-                                result = call_llm(
-                                    model=model,
-                                    system_prompt=system_prompt,
-                                    user_prompt=agent_input,
-                                    max_tokens=max_tokens,
-                                )
-                                st.session_state["last_agent_output"] = result
-                                st.session_state["handoff_buffer"] = result
-                                st.session_state["handoff_buffer_widget"] = result
-                                st.success("Agent execution completed.")
-                            except Exception as e:
-                                st.error(f"Agent call failed: {e}")
-
-                    with col_view:
-                        view_mode = st.radio(
-                            ui["agent_result_view"],
-                            options=[ui["text_view"], ui["markdown_view"]],
-                            key=f"view_{aid}_{wi.get('id')}",
-                            horizontal=True,
-                        )
-
-                    if st.session_state["last_agent_output"]:
-                        if view_mode == ui["markdown_view"]:
-                            st.markdown(st.session_state["last_agent_output"])
-                        else:
-                            st.text(st.session_state["last_agent_output"])
-
-
-# --------------------------
-# Refinement / Prompt on Plan
-# --------------------------
-
-def render_refinement_tab():
-    ui = get_ui_text()
-    plan = st.session_state["project_plan"]
-    st.subheader(ui["chat_tab"])
-    if not plan:
-        st.info(ui["plan_missing"])
-        return
-
-    refinement_prompt = st.text_area(
-        ui["chat_prompt"],
-        value="For Item 10, strictly focus on Generative AI for label recognition.",
-        height=140,
-    )
-    if st.button(ui["run_refinement"]):
-        try:
-            model = st.session_state["orchestrator_settings"]["model"]
-            max_tokens = 2000
-            system_prompt = (
-                "You are a JSON patch generator for the current project plan. "
-                "You MUST return only a valid JSON fragment that can be merged into "
-                "the existing plan (e.g., an updated workItems array or a single updated object)."
-            )
-            user_prompt = (
-                "Current plan JSON:\n"
-                + json.dumps(plan, ensure_ascii=False, indent=2)
-                + "\n\nUser refinement request:\n"
-                + refinement_prompt
-                + "\n\nReturn ONLY the updated JSON fragment, no comments, no markdown."
-            )
-            result = call_llm(
-                model=model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                max_tokens=max_tokens,
-            )
-            st.session_state["refined_fragment"] = result
-            st.success("Refinement result generated (raw JSON fragment below).")
-        except Exception as e:
-            st.error(f"Refinement LLM call failed: {e}")
-
-    if st.session_state["refined_fragment"]:
-        st.markdown("**Refined JSON fragment (editable before apply):**")
-        frag = st.text_area(
-            "",
-            value=st.session_state["refined_fragment"],
-            key="refined_fragment",
-            height=200,
-        )
-        if st.button(ui["apply_refinement"]):
-            try:
-                fragment_obj = parse_json_from_llm(frag)
-                plan = st.session_state["project_plan"] or {}
-                for key in ["meta", "workItems", "timeline", "risks", "dependencies"]:
-                    if key in fragment_obj:
-                        plan[key] = fragment_obj[key]
-                st.session_state["project_plan"] = plan
-                st.success("Refined fragment applied to current plan.")
-            except Exception as e:
-                st.error(f"Failed to apply fragment: {e}")
-
-
-# -------------------------
-# Orchestrator Runner (UI)
-# -------------------------
-
-def run_orchestrator_ui():
-    ui = get_ui_text()
-    st.subheader(ui["orchestrator_settings"])
-
-    settings = st.session_state["orchestrator_settings"]
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        model = st.selectbox(
-            ui["model"],
-            options=SUPPORTED_MODELS,
-            index=SUPPORTED_MODELS.index(settings["model"])
-            if settings["model"] in SUPPORTED_MODELS
-            else 0,
-        )
-    with col2:
-        max_tokens = st.number_input(
-            ui["max_tokens"],
-            min_value=256,
-            max_value=64000,
-            value=settings.get("max_tokens", DEFAULT_MAX_TOKENS),
-            step=512,
-        )
-
-    system_prompt_override = st.text_area(
-        ui["system_prompt"],
-        value=settings.get("system_prompt", ""),
-        height=150,
-    )
-
-    settings["model"] = model
-    settings["max_tokens"] = max_tokens
-    settings["system_prompt"] = system_prompt_override
-    st.session_state["orchestrator_settings"] = settings
-
-    project_text = st.text_area(
-        ui["project_input"],
-        height=280,
-        key="project_input",
-        value="",
-    )
-
-    if st.button(ui["run_orchestrator"]):
-        if not project_text.strip():
-            st.warning("Please paste a project / tender description first.")
-        else:
-            try:
-                base_system_prompt = (
-                    system_prompt_override
-                    if system_prompt_override.strip()
-                    else build_orchestrator_system_prompt()
-                )
-                user_prompt = (
-                    "Project / tender description:\n\n"
-                    + project_text
-                    + "\n\nNow generate the ProjectPlan JSON as specified."
-                )
-                with st.spinner("Orchestrating project plan with selected model..."):
-                    raw = call_llm(
-                        model=model,
-                        system_prompt=base_system_prompt,
-                        user_prompt=user_prompt,
-                        max_tokens=max_tokens,
-                    )
-                plan = parse_json_from_llm(raw)
-                st.session_state["project_plan"] = plan
-                st.success("Project plan generated successfully.")
-            except Exception as e:
-                st.error(f"Orchestrator call failed: {e}")
-
-
-# -------------------------
-# Supply chain – helpers
-# -------------------------
-
-def load_uploaded_df(file) -> pd.DataFrame:
-    if file is None:
-        return None
-    name = file.name.lower()
-    try:
-        if name.endswith(".csv"):
-            return pd.read_csv(file)
-        elif name.endswith(".json"):
-            data = json.load(file)
-            return pd.DataFrame(data)
-        else:
-            # try CSV first, then JSON
-            try:
-                file.seek(0)
-                return pd.read_csv(file)
-            except Exception:
-                file.seek(0)
-                data = json.load(file)
-                return pd.DataFrame(data)
-    except Exception as e:
-        st.error(f"Failed to parse uploaded file: {e}")
-        return None
-
-
-def build_supply_chain_graph(
-    supplier_df: pd.DataFrame,
-    hospital_df: pd.DataFrame,
-    min_quantity: float = 0.0,
-    device_filter: Optional[List[str]] = None,
-) -> Optional[go.Figure]:
-    # require at least supplier_name and hospital_name from supplier_df
-    if "supplier_name" not in supplier_df.columns:
-        return None
-    if "hospital_name" not in supplier_df.columns and "hospital_name" not in hospital_df.columns:
-        return None
-
-    df_sup = supplier_df.copy()
-    if device_filter:
-        if "device_id" in df_sup.columns:
-            df_sup = df_sup[df_sup["device_id"].isin(device_filter)]
-
-    # quantity aggregation
-    qty_col = "quantity" if "quantity" in df_sup.columns else None
-    if qty_col:
-        grp = (
-            df_sup.groupby(
-                ["supplier_name", "hospital_name"],
-                dropna=False,
-            )[qty_col]
-            .sum()
-            .reset_index()
-        )
-        grp = grp[grp[qty_col] >= min_quantity]
-    else:
-        grp = (
-            df_sup.groupby(
-                ["supplier_name", "hospital_name"],
-                dropna=False,
-            )
-            .size()
-            .reset_index(name="count")
-        )
-        qty_col = "count"
-        grp = grp[grp[qty_col] >= min_quantity]
-
-    if grp.empty:
-        return None
-
-    G = nx.Graph()
-    for _, row in grp.iterrows():
-        s = row["supplier_name"]
-        h = row["hospital_name"]
-        qty = row[qty_col]
-        if pd.isna(h):
-            continue
-        G.add_node(s, type="supplier")
-        G.add_node(h, type="hospital")
-        G.add_edge(s, h, weight=float(qty))
-
-    if not G.nodes:
-        return None
-
-    pos = nx.spring_layout(G, seed=42, k=0.6)
-
-    edge_x = []
-    edge_y = []
-    edge_weights = []
-    for edge in G.edges(data=True):
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x += [x0, x1, None]
-        edge_y += [y0, y1, None]
-        edge_weights.append(edge[2].get("weight", 1.0))
-
-    node_x = []
-    node_y = []
-    node_text = []
-    node_color = []
-    node_size = []
-
-    max_weight = max(edge_weights) if edge_weights else 1.0
-    for node, data in G.nodes(data=True):
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        typ = data.get("type", "other")
-        if typ == "supplier":
-            node_color.append("#0ea5e9")  # blue
-        elif typ == "hospital":
-            node_color.append("#22c55e")  # green
-        else:
-            node_color.append("#e5e7eb")
-        total_weight = sum(
-            e[2].get("weight", 1.0)
-            for e in G.edges(node, data=True)
-        )
-        size = 10 + 30 * (total_weight / max_weight)
-        node_size.append(size)
-        node_text.append(f"{typ}: {node}\nTotal quantity: {total_weight}")
-
-    edge_trace = go.Scatter(
-        x=edge_x,
-        y=edge_y,
-        line=dict(width=1, color="#9ca3af"),
-        hoverinfo="none",
-        mode="lines",
-    )
-
-    node_trace = go.Scatter(
-        x=node_x,
-        y=node_y,
-        mode="markers",
-        hoverinfo="text",
-        marker=dict(
-            showscale=False,
-            color=node_color,
-            size=node_size,
-            line_width=1,
-            line_color="#020617",
-        ),
-        text=node_text,
-    )
-
-    fig = go.Figure(
-        data=[edge_trace, node_trace],
-        layout=go.Layout(
-            showlegend=False,
-            margin=dict(b=0, l=0, r=0, t=0),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        ),
-    )
-    return fig
-
-
-# -------------------------
-# Supply chain – main tab UI
-# -------------------------
-
-def render_supply_chain_tab():
-    ui = get_ui_text()
-    st.subheader(ui["supply_tab"])
-    st.caption(ui["supply_intro"])
-
-    supplier_df: pd.DataFrame = st.session_state["supplier_df"]
-    hospital_df: pd.DataFrame = st.session_state["hospital_df"]
-
-    # WOW metrics for supply chain
-    render_supply_wow_status()
-
-    st.markdown("---")
-    st.markdown(f"### {ui['supply_datasets_section']}")
-
-    col_sup, col_hosp = st.columns(2)
-
-    # Supplier dataset
-    with col_sup:
-        st.markdown(f"**{ui['supplier_dataset']}**")
-        uploaded_sup = st.file_uploader(
-            ui["upload_supplier"],
-            type=["csv", "json"],
-            key="upload_supplier",
-        )
-        if uploaded_sup is not None:
-            df = load_uploaded_df(uploaded_sup)
-            if df is not None:
-                st.session_state["supplier_df"] = df
-                supplier_df = df
-                st.success("Supplier dataset loaded.")
-
-        supplier_df = st.data_editor(
-            supplier_df,
-            key="supplier_df_editor",
-            use_container_width=True,
-            num_rows="dynamic",
-        )
-        st.session_state["supplier_df"] = supplier_df
-
-        sup_csv = supplier_df.to_csv(index=False).encode("utf-8")
-        sup_json = json.dumps(
-            supplier_df.to_dict(orient="records"), ensure_ascii=False, indent=2
-        ).encode("utf-8")
-
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            st.download_button(
-                ui["download_supplier_csv"],
-                data=sup_csv,
-                file_name="supplier_packing_list.csv",
-                mime="text/csv",
-            )
-        with c2:
-            st.download_button(
-                ui["download_supplier_json"],
-                data=sup_json,
-                file_name="supplier_packing_list.json",
-                mime="application/json",
-            )
-        with c3:
-            if st.button(ui["reset_to_mock"], key="reset_supplier"):
-                st.session_state["supplier_df"] = create_mock_supplier_df()
-                st.experimental_rerun()
-
-    # Hospital dataset
-    with col_hosp:
-        st.markdown(f"**{ui['hospital_dataset']}**")
-        uploaded_hosp = st.file_uploader(
-            ui["upload_hospital"],
-            type=["csv", "json"],
-            key="upload_hospital",
-        )
-        if uploaded_hosp is not None:
-            df = load_uploaded_df(uploaded_hosp)
-            if df is not None:
-                st.session_state["hospital_df"] = df
-                hospital_df = df
-                st.success("Hospital dataset loaded.")
-
-        hospital_df = st.data_editor(
-            hospital_df,
-            key="hospital_df_editor",
-            use_container_width=True,
-            num_rows="dynamic",
-        )
-        st.session_state["hospital_df"] = hospital_df
-
-        hosp_csv = hospital_df.to_csv(index=False).encode("utf-8")
-        hosp_json = json.dumps(
-            hospital_df.to_dict(orient="records"), ensure_ascii=False, indent=2
-        ).encode("utf-8")
-
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            st.download_button(
-                ui["download_hospital_csv"],
-                data=hosp_csv,
-                file_name="hospital_incoming_list.csv",
-                mime="text/csv",
-            )
-        with c2:
-            st.download_button(
-                ui["download_hospital_json"],
-                data=hosp_json,
-                file_name="hospital_incoming_list.json",
-                mime="application/json",
-            )
-        with c3:
-            if st.button(ui["reset_to_mock"], key="reset_hospital"):
-                st.session_state["hospital_df"] = create_mock_hospital_df()
-                st.experimental_rerun()
-
-    st.markdown("---")
-
-    # Summary section
-    st.markdown(f"### {ui['supply_summary_section']}")
-    st.caption(ui["summary_words_hint"])
-
-    lang_choice = st.radio(
-        ui["summary_language"],
-        options=[LANG_EN, LANG_ZH],
-        horizontal=True,
-        key="supply_summary_lang",
-        index=0 if st.session_state["lang"] == LANG_EN else 1,
-    )
-
-    col_m1, col_m2 = st.columns([2, 1])
-    with col_m1:
-        model = st.selectbox(
-            ui["model"],
-            options=SUPPORTED_MODELS,
-            key="supply_summary_model",
-        )
-    with col_m2:
-        max_tokens = st.number_input(
-            ui["max_tokens"],
-            min_value=2000,
-            max_value=32000,
-            value=8000,
-            step=500,
-            key="supply_summary_max_tokens",
-        )
-
-    default_prompt_en = (
-        "You are a senior medical device supply chain analyst.\n"
-        "Using the supplier packing list and hospital incoming list provided below, "
-        "write a comprehensive analytical report between 1000 and 2000 words.\n\n"
-        "Requirements:\n"
-        "- Focus on traceability between suppliers and hospitals, lot-level tracking, and potential discrepancies.\n"
-        "- Highlight risks (e.g., expiry risk, quantity mismatch, shipments without receipts, receipts without shipments).\n"
-        "- Provide operational insights and recommendations for quality, safety, and regulatory compliance.\n"
-        "- Use Markdown formatting with clear headings and subheadings.\n"
-        "- Include exactly 5 graph-style sections in Markdown. For each graph, use a heading like:\n"
-        "  '### Graph N: <short title>' and then describe what the chart shows and the key insights.\n"
-        "- You do NOT need to embed actual code, only describe the graphs and reference the metrics that could be plotted.\n"
-    )
-    default_prompt_zh = (
-        "你是一位資深醫療器材供應鏈分析顧問。\n"
-        "請根據下方的供應商裝箱單與醫院入庫清單，撰寫一份長度約 1000–2000 字的完整分析報告。\n\n"
-        "需求：\n"
-        "- 著重於供應商與醫院之間的追溯性（包含批號、效期、數量等資訊）。\n"
-        "- 說明可能的風險（例如效期風險、數量差異、已出貨但未入庫、已入庫但無出貨紀錄等）。\n"
-        "- 提出在品質、安全與法規遵循方面的實務建議。\n"
-        "- 使用 Markdown 格式，清楚分段與標題。\n"
-        "- 請加入剛好 5 個圖表說明段落。每個圖表以標題開頭，例如：\n"
-        "  「### 圖 N：<簡短標題>」，接著描述圖表呈現的指標與主要洞見。\n"
-        "- 不需要提供實際程式碼，只要以文字說明圖表的內容與可視化重點。\n"
-    )
-
-    default_prompt = default_prompt_en if lang_choice == LANG_EN else default_prompt_zh
-
-    custom_prompt = st.text_area(
-        "System-level guidance for the summary (you can modify):",
-        value=default_prompt,
-        height=220,
-        key="supply_summary_custom_prompt",
-    )
-
-    if st.button(ui["summary_run"]):
-        try:
-            # Serialize datasets; keep reasonable size by truncating if huge
-            supplier_csv = st.session_state["supplier_df"].to_csv(index=False)
-            hospital_csv = st.session_state["hospital_df"].to_csv(index=False)
-
-            prefix_en = (
-                "Below are two CSV datasets.\n\n"
-                "=== SUPPLIER PACKING LIST (CSV) ===\n"
-            )
-            prefix_zh = "以下為兩份 CSV 資料集。\n\n=== 供應商裝箱單（CSV） ===\n"
-
-            mid_en = "\n\n=== HOSPITAL INCOMING LIST (CSV) ===\n"
-            mid_zh = "\n\n=== 醫院入庫清單（CSV） ===\n"
-
-            user_prompt = (
-                (prefix_en if lang_choice == LANG_EN else prefix_zh)
-                + supplier_csv
-                + (mid_en if lang_choice == LANG_EN else mid_zh)
-                + hospital_csv
-            )
-
-            system_prompt = custom_prompt
-            with st.spinner("Generating supply chain summary with selected model..."):
-                result = call_llm(
-                    model=model,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    max_tokens=int(max_tokens),
-                )
-            st.session_state["supply_summary_md"] = result
-            st.success("Supply chain summary generated.")
-        except Exception as e:
-            st.error(f"Failed to generate summary: {e}")
-
-    if st.session_state["supply_summary_md"]:
-        st.markdown(f"**{ui['summary_latest']}**")
-        edited = st.text_area(
-            "",
-            value=st.session_state["supply_summary_md"],
-            key="supply_summary_md_editor",
-            height=420,
-        )
-        st.session_state["supply_summary_md"] = edited
-        # Render as markdown preview
-        st.markdown("---")
-        view_mode = st.radio(
-            ui["agent_result_view"],
-            options=[ui["text_view"], ui["markdown_view"]],
-            horizontal=True,
-            key="supply_summary_view_mode",
-        )
-        if view_mode == ui["markdown_view"]:
-            st.markdown(edited)
-        else:
-            st.text(edited)
-
-    st.markdown("---")
-
-    # Interactive supply chain graph
-    st.markdown(f"### {ui['graph_section']}")
-    st.caption(ui["graph_hint"])
-
-    # Filters
-    col_f1, col_f2 = st.columns([1, 2])
-    with col_f1:
-        min_ship = st.number_input(
-            ui["min_shipments"],
-            min_value=0.0,
-            max_value=1e9,
-            value=0.0,
-            step=1.0,
-            key="graph_min_shipments",
-        )
-    with col_f2:
-        dev_ids = []
-        if "device_id" in supplier_df.columns:
-            dev_ids = sorted(supplier_df["device_id"].dropna().unique())
-        if dev_ids:
-            device_filter = st.multiselect(
-                ui["filter_device"],
-                options=dev_ids,
-                key="graph_device_filter",
-            )
-        else:
-            device_filter = None
-
-    fig = build_supply_chain_graph(
-        supplier_df=supplier_df,
-        hospital_df=hospital_df,
-        min_quantity=min_ship,
-        device_filter=device_filter,
-    )
-    if fig is None:
-        st.info(ui["no_graph_data"])
-    else:
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("---")
-
-    # Prompt-on-datasets
-    st.markdown(f"### {ui['data_chat_section']}")
-    data_chat_prompt = st.text_area(
-        ui["data_chat_prompt"],
-        height=140,
-        key="data_chat_prompt",
-        value="Identify any discrepancies between shipped and received quantities by device and hospital, "
-              "and summarize key risks and operational recommendations.",
-    )
-
-    col_c1, col_c2 = st.columns([2, 1])
-    with col_c1:
-        data_chat_model = st.selectbox(
-            ui["model"],
-            options=SUPPORTED_MODELS,
-            key="data_chat_model",
-        )
-    with col_c2:
-        data_chat_max_tokens = st.number_input(
-            ui["max_tokens"],
-            min_value=512,
-            max_value=24000,
-            value=4000,
-            step=512,
-            key="data_chat_max_tokens",
-        )
-
-    if st.button(ui["data_chat_run"]):
-        try:
-            supplier_csv = st.session_state["supplier_df"].to_csv(index=False)
-            hospital_csv = st.session_state["hospital_df"].to_csv(index=False)
-
-            if st.session_state["lang"] == LANG_EN:
-                system_prompt = (
-                    "You are a medical device supply chain data analyst. "
-                    "You are given two CSV datasets: a supplier packing list and a hospital incoming list. "
-                    "Use them to answer the user's question accurately. "
-                    "If you compute metrics, explain them clearly in text or markdown."
-                )
-                user_prompt = (
-                    "SUPPLIER PACKING LIST (CSV):\n"
-                    + supplier_csv
-                    + "\n\nHOSPITAL INCOMING LIST (CSV):\n"
-                    + hospital_csv
-                    + "\n\nUser question / instruction:\n"
-                    + data_chat_prompt
-                )
-            else:
-                system_prompt = (
-                    "你是一位醫療器材供應鏈資料分析師。"
-                    "你會看到兩份 CSV 資料：供應商裝箱單與醫院入庫清單。"
-                    "請善用這些資料回答使用者的問題，並以清楚的文字或 Markdown 說明你的計算與結論。"
-                )
-                user_prompt = (
-                    "【供應商裝箱單（CSV）】\n"
-                    + supplier_csv
-                    + "\n\n【醫院入庫清單（CSV）】\n"
-                    + hospital_csv
-                    + "\n\n使用者問題 / 指示：\n"
-                    + data_chat_prompt
-                )
-
-            with st.spinner("Running ad‑hoc analysis on datasets..."):
-                out = call_llm(
-                    model=data_chat_model,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    max_tokens=int(data_chat_max_tokens),
-                )
-            st.session_state["data_chat_output"] = out
-            st.success("Dataset question answered.")
-        except Exception as e:
-            st.error(f"Failed to run dataset QA: {e}")
-
-    if st.session_state["data_chat_output"]:
-        view_mode = st.radio(
-            ui["agent_result_view"],
-            options=[ui["text_view"], ui["markdown_view"]],
-            horizontal=True,
-            key="data_chat_view_mode",
-        )
-        if view_mode == ui["markdown_view"]:
-            st.markdown(st.session_state["data_chat_output"])
-        else:
-            st.text(st.session_state["data_chat_output"])
-
-    st.markdown("---")
-
-    # Run agents.yaml agents on datasets
-    st.markdown(f"### {ui['data_agent_section']}")
-    agents = st.session_state["agents_config"]["agents"]
-    if not agents:
-        st.info("No agents loaded from agents.yaml.")
-        return
-
-    agent_options = {f"{a.get('id')} – {a.get('name')}": a for a in agents}
-    selected_label = st.selectbox(
-        ui["data_agent_select"],
-        options=list(agent_options.keys()),
-        key="data_agent_select",
-    )
-    selected_agent = agent_options[selected_label]
-
-    st.markdown(
-        f"- **ID:** {selected_agent.get('id')}\n"
-        f"- **Name:** {selected_agent.get('name')}\n"
-        f"- **Role:** {selected_agent.get('role')}\n"
-        f"- **Capabilities:** {', '.join(selected_agent.get('capabilities', []))}"
-    )
-
-    col_am1, col_am2 = st.columns([2, 1])
-    with col_am1:
-        agent_model = st.selectbox(
-            ui["model"],
-            options=SUPPORTED_MODELS,
-            key="data_agent_model",
-            index=SUPPORTED_MODELS.index(selected_agent.get("model"))
-            if selected_agent.get("model") in SUPPORTED_MODELS
-            else 0,
-        )
-    with col_am2:
-        agent_max_tokens = st.number_input(
-            ui["max_tokens"],
-            min_value=512,
-            max_value=24000,
-            value=6000,
-            step=512,
-            key="data_agent_max_tokens",
-        )
-
-    default_agent_user_prompt = (
-        "You are executing this agent directly on two tabular datasets: "
-        "a supplier packing list and a hospital incoming list. "
-        "Use your built-in role and capabilities, but ground your reasoning strictly on the data.\n\n"
-        "Typical tasks include:\n"
-        "- cross‑checking shipment vs. receipt quantities and dates\n"
-        "- flagging anomalies and risks\n"
-        "- generating structured findings or recommendations\n"
-        "- preparing data for downstream agents\n\n"
-        "You may respond in markdown or plain text as appropriate.\n"
-    )
-    data_agent_user_prompt = st.text_area(
-        ui["data_prompt_with_context"],
-        value=default_agent_user_prompt,
-        height=200,
-        key="data_agent_user_prompt",
-    )
-
-    if st.button(ui["data_agent_run"]):
-        try:
-            supplier_csv = st.session_state["supplier_df"].to_csv(index=False)
-            hospital_csv = st.session_state["hospital_df"].to_csv(index=False)
-
-            system_prompt = selected_agent.get("system_prompt", "") or (
-                "You are an AI agent defined in agents.yaml. "
-                "You are now applied to medical device supply chain datasets "
-                "to perform analysis or transformation according to the user instructions."
-            )
-            user_prompt = (
-                data_agent_user_prompt
-                + "\n\n=== SUPPLIER PACKING LIST (CSV) ===\n"
-                + supplier_csv
-                + "\n\n=== HOSPITAL INCOMING LIST (CSV) ===\n"
-                + hospital_csv
-            )
-
-            with st.spinner("Running selected agent on datasets..."):
-                out = call_llm(
-                    model=agent_model,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    max_tokens=int(agent_max_tokens),
-                )
-            st.session_state["last_agent_output"] = out
-            st.session_state["handoff_buffer"] = out
-            st.session_state["handoff_buffer_widget"] = out
-            st.success("Agent execution on datasets completed.")
-
-            view_mode = st.radio(
-                ui["agent_result_view"],
-                options=[ui["text_view"], ui["markdown_view"]],
-                key="data_agent_view_mode",
-                horizontal=True,
-            )
-            if view_mode == ui["markdown_view"]:
-                st.markdown(out)
-            else:
-                st.text(out)
-        except Exception as e:
-            st.error(f"Failed to run agent on datasets: {e}")
-
-
-# ---------------------
-# API Key Config (UI)
-# ---------------------
-
-def render_api_key_section():
-    ui = get_ui_text()
-    st.subheader(ui["api_section"])
-    st.caption(ui["api_hint"])
-
-    keys = st.session_state["api_keys"]
-
-    def masked_placeholder(value: Optional[str]) -> str:
-        if value:
-            return "******** (from env / stored)"
-        return ""
-
-    openai_input = st.text_input(
-        ui["openai_key"],
-        type="password",
-        placeholder=masked_placeholder(keys.get("openai")),
-    )
-    gemini_input = st.text_input(
-        ui["gemini_key"],
-        type="password",
-        placeholder=masked_placeholder(keys.get("gemini")),
-    )
-    anthropic_input = st.text_input(
-        ui["anthropic_key"],
-        type="password",
-        placeholder=masked_placeholder(keys.get("anthropic")),
-    )
-    grok_input = st.text_input(
-        ui["grok_key"],
-        type="password",
-        placeholder=masked_placeholder(keys.get("grok")),
-    )
-
-    if st.button(get_ui_text()["save_keys"]):
-        if openai_input.strip():
-            keys["openai"] = openai_input.strip()
-        if gemini_input.strip():
-            keys["gemini"] = gemini_input.strip()
-        if anthropic_input.strip():
-            keys["anthropic"] = anthropic_input.strip()
-        if grok_input.strip():
-            keys["grok"] = grok_input.strip()
-        st.session_state["api_keys"] = keys
-        st.success("API keys updated for this session.")
-
-
-# ----------------------
-# Layout & Main Entrypoint
-# ----------------------
-
-def sidebar_controls():
-    ui = get_ui_text()
-    st.sidebar.markdown("### UI")
-
-    theme = st.sidebar.radio(
-        ui["theme"],
+    st.session_state["lang"] = lang[0]
+
+    # Theme
+    theme_mode = st.sidebar.radio(
+        t("theme"),
         options=["light", "dark"],
-        key="theme_widget",
-        horizontal=True,
-        index=0 if st.session_state["theme"] == "light" else 1,
+        index=0 if st.session_state["theme_mode"] == "light" else 1,
+        format_func=lambda x: t("theme_light") if x == "light" else t("theme_dark"),
     )
-    st.session_state["theme"] = theme
+    st.session_state["theme_mode"] = theme_mode
 
-    lang = st.sidebar.radio(
-        ui["language"],
-        options=[LANG_EN, LANG_ZH],
-        key="lang_widget",
-        horizontal=True,
-        index=0 if st.session_state["lang"] == LANG_EN else 1,
+    # Painter style & Jackpot
+    st.sidebar.subheader(t("style"))
+    style_options = list(PAINTER_STYLES.keys())
+    current_index = style_options.index(st.session_state["style_name"]) if st.session_state["style_name"] in style_options else 0
+    style_sel = st.sidebar.selectbox(
+        " ",
+        options=style_options,
+        index=current_index,
     )
-    st.session_state["lang"] = lang
-
-    apply_custom_theme()
-    ui = get_ui_text()
-
-    st.sidebar.markdown("### 🎨 Style")
-    st.sidebar.selectbox(
-        ui["painter_style"],
-        options=PAINTER_STYLES,
-        index=PAINTER_STYLES.index(st.session_state["painter_style"])
-        if st.session_state["painter_style"] in PAINTER_STYLES
-        else 0,
-        key="painter_style",
-    )
-
-    if st.sidebar.button(ui["jackpot"]):
-        st.session_state["painter_style"] = random.choice(PAINTER_STYLES)
+    st.session_state["style_name"] = style_sel
+    if st.sidebar.button(t("style_jackpot")):
+        import random
+        st.session_state["style_name"] = random.choice(style_options)
 
     st.sidebar.markdown("---")
-    if st.sidebar.button(get_ui_text()["refresh_config"]):
-        refresh_config()
-        st.sidebar.success("Config reloaded.")
+    st.sidebar.subheader(t("data_manager"))
 
+    # File uploaders
+    dm: DataManager = st.session_state["data_manager"]
+    up_510k = st.sidebar.file_uploader(t("upload_510k"), type=["csv"], key="510k_upl")
+    if up_510k is not None:
+        df = pd.read_csv(up_510k)
+        dm.update_from_upload("510k", df)
+
+    up_gudid = st.sidebar.file_uploader(t("upload_gudid"), type=["csv"], key="gudid_upl")
+    if up_gudid is not None:
+        df = pd.read_csv(up_gudid)
+        dm.update_from_upload("gudid", df)
+
+    up_class = st.sidebar.file_uploader(t("upload_classification"), type=["csv"], key="class_upl")
+    if up_class is not None:
+        df = pd.read_csv(up_class)
+        dm.update_from_upload("class", df)
+
+    up_safety = st.sidebar.file_uploader(t("upload_safety"), type=["csv"], key="safety_upl")
+    if up_safety is not None:
+        df = pd.read_csv(up_safety)
+        dm.update_from_upload("safety", df)
+
+    up_recall = st.sidebar.file_uploader(t("upload_recall"), type=["csv"], key="recall_upl")
+    if up_recall is not None:
+        df = pd.read_csv(up_recall)
+        dm.update_from_upload("recall", df)
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader(t("api_keys"))
+
+    def api_status_row(label_key, env_name, ui_state_key):
+        env_val = os.getenv(env_name)
+        if env_val:
+            # show connected badge only, do not show key
+            st.sidebar.markdown(
+                f"<div class='wow-badge'><div class='wow-dot-green'></div>{t(label_key)}: {t('api_connected')}</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.sidebar.markdown(
+                f"<div class='wow-badge'><div class='wow-dot-red'></div>{t(label_key)}: {t('api_missing')}</div>",
+                unsafe_allow_html=True,
+            )
+            st.sidebar.text_input(
+                f"{t(label_key)} - {t('enter_api_key')}",
+                type="password",
+                key=ui_state_key,
+            )
+
+    api_status_row("openai_status", "OPENAI_API_KEY", "openai_key_ui")
+    api_status_row("gemini_status", "GEMINI_API_KEY", "gemini_key_ui")
+    api_status_row("anthropic_status", "ANTHROPIC_API_KEY", "anthropic_key_ui")
+    api_status_row("grok_status", "GROK_API_KEY", "grok_key_ui")
+
+
+def render_dashboard():
+    st.subheader(t("wow_indicators"))
+    dm: DataManager = st.session_state["data_manager"]
+    total_recalls, avg_days, high_risk = dm.compute_indicators()
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("<div class='wow-card'>", unsafe_allow_html=True)
+        st.markdown(f"<div class='wow-metric-label'>{t('total_recalls')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='wow-metric-value'>{total_recalls}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='wow-card'>", unsafe_allow_html=True)
+        st.markdown(f"<div class='wow-metric-label'>{t('avg_days_clearance')}</div>", unsafe_allow_html=True)
+        value = f"{avg_days} d" if avg_days is not None else "N/A"
+        st.markdown(f"<div class='wow-metric-value'>{value}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c3:
+        st.markdown("<div class='wow-card'>", unsafe_allow_html=True)
+        st.markdown(f"<div class='wow-metric-label'>{t('high_risk_devices')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='wow-metric-value'>{high_risk}</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("### TPLC Overview")
+
+    if not dm.df_master.empty:
+        # Recalls by classification
+        fig1 = px.bar(
+            dm.df_master.groupby("classification")["res_event_number"].count().reset_index(),
+            x="classification",
+            y="res_event_number",
+            title="Recalls by Classification",
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+
+        # Recalls by specialty
+        if "specialty" in dm.df_master.columns:
+            fig2 = px.bar(
+                dm.df_master.groupby("specialty")["res_event_number"].count().reset_index(),
+                x="specialty",
+                y="res_event_number",
+                title="Recalls by Specialty",
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # Timeline mock (decision date vs recall year)
+        if "decision_date" in dm.df_master.columns:
+            tmp = dm.df_master.dropna(subset=["decision_date"]).copy()
+            if not tmp.empty:
+                tmp["decision_year"] = tmp["decision_date"].dt.year
+                fig3 = px.scatter(
+                    tmp,
+                    x="decision_year",
+                    y="year",
+                    color="device_name",
+                    title="Decision Year vs Recall Year",
+                )
+                st.plotly_chart(fig3, use_container_width=True)
+    else:
+        st.info("No master data available. Please upload datasets or use mock data.")
+
+
+def render_agent_lab():
+    st.subheader(t("agents"))
+    agents_cfg = st.session_state["agents_config"] or {}
+    skills_map = st.session_state["skills_map"]
+    orchestrator: LLMOrchestrator = st.session_state["llm_orchestrator"]
+
+    if not agents_cfg:
+        st.warning("No agents loaded from agents.yaml.")
+        return
+
+    agent_keys = list(agents_cfg.keys())
+    agent_labels = [f"{k} — {agents_cfg[k].get('name', '')}" for k in agent_keys]
+    selected_idx = st.selectbox(
+        t("select_agent"),
+        options=list(range(len(agent_keys))),
+        format_func=lambda i: agent_labels[i],
+    )
+    agent_key = agent_keys[selected_idx]
+    agent = agents_cfg[agent_key]
+
+    with st.expander(t("agent_system_prompt"), expanded=True):
+        sys_prompt_session = st.text_area(
+            "",
+            value=agent.get("system_prompt", ""),
+            height=160,
+            key=f"sys_prompt_{agent_key}",
+        )
+
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        model_default = agent.get("model_name", "gpt-4o-mini")
+        if model_default not in SUPPORTED_MODELS:
+            model_default = "gpt-4o-mini"
+        model_sel = st.selectbox(
+            t("agent_model"),
+            options=SUPPORTED_MODELS,
+            index=SUPPORTED_MODELS.index(model_default),
+            key=f"agent_model_{agent_key}",
+        )
+    with c2:
+        temperature = st.slider(
+            t("agent_temperature"),
+            min_value=0.0,
+            max_value=1.0,
+            value=float(agent.get("temperature", 0.2)),
+            step=0.05,
+            key=f"agent_temp_{agent_key}",
+        )
+    with c3:
+        max_tokens = st.number_input(
+            t("agent_max_tokens"),
+            min_value=64,
+            max_value=120000,
+            value=DEFAULT_MAX_TOKENS,
+            step=256,
+            key=f"agent_maxtok_{agent_key}",
+        )
+
+    user_prompt = st.text_area(
+        t("agent_user_prompt"),
+        height=160,
+        key=f"user_prompt_{agent_key}",
+    )
+
+    # Optionally chain from previous pipeline step
+    pipeline = st.session_state["agent_pipeline"]
+    if pipeline:
+        st.markdown(f"#### {t('agent_pipeline')}")
+        for idx, step in enumerate(pipeline):
+            st.markdown(f"**[{idx}] {step['agent_label']}**")
+        selected_pipeline_idx = st.selectbox(
+            "Use previous output as context (optional)",
+            options=["None"] + list(range(len(pipeline))),
+            format_func=lambda x: "None" if x == "None" else f"Step {x}",
+            key=f"pipeline_sel_{agent_key}",
+        )
+    else:
+        selected_pipeline_idx = "None"
+
+    if st.button(t("run_agent")):
+        try:
+            extra_instruction = ""
+            context_text = ""
+            if selected_pipeline_idx != "None":
+                step = pipeline[int(selected_pipeline_idx)]
+                context_text = step["output"]
+                extra_instruction = "You are receiving prior agent output as context:\n" + context_text
+
+            full_system_prompt = build_agent_prompt(
+                agent_key,
+                agents_cfg,
+                skills_map,
+                system_override=sys_prompt_session,
+                extra_instruction=extra_instruction,
+            )
+            result = orchestrator.call_llm(
+                model_sel,
+                full_system_prompt,
+                user_prompt,
+                max_tokens=int(max_tokens),
+                temperature=float(temperature),
+            )
+            new_step = {
+                "agent_key": agent_key,
+                "agent_label": agents_cfg[agent_key].get("name", agent_key),
+                "model": model_sel,
+                "output": result,
+            }
+            st.session_state["agent_pipeline"].append(new_step)
+        except Exception as e:
+            st.error(f"Agent execution error: {e}")
+
+    # Show pipeline with text/markdown toggle and "Use as next"
+    if st.session_state["agent_pipeline"]:
+        st.markdown(f"### {t('agent_pipeline')}")
+        for i, step in enumerate(st.session_state["agent_pipeline"]):
+            st.markdown(f"---\n**Step {i}: {step['agent_label']} ({step['model']})**")
+            view_mode = st.radio(
+                t("view_mode"),
+                options=["text", "markdown"],
+                index=1,
+                key=f"view_mode_{i}",
+                format_func=lambda x: t("view_text") if x == "text" else t("view_markdown"),
+            )
+            if view_mode == "markdown":
+                st.markdown(step["output"])
+            else:
+                st.text_area(" ", step["output"], height=200, key=f"pipeline_output_{i}")
+            if st.button(f"{t('use_as_next')} #{i}", key=f"use_next_{i}"):
+                st.session_state[f"user_prompt_{agent_key}"] = step["output"]
+                st.experimental_rerun()
+
+
+def render_note_keeper():
+    st.markdown("### " + t("note_keeper_tab"))
+    orchestrator: LLMOrchestrator = st.session_state["llm_orchestrator"]
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### " + t("note_input"))
+        st.session_state["note_raw"] = st.text_area(
+            "",
+            value=st.session_state["note_raw"],
+            height=260,
+            key="note_raw_input",
+        )
+        if st.button(t("transform_to_md")):
+            try:
+                system_prompt = textwrap.dedent("""
+                你是一位專精醫療器材與法規寫作的筆記整理助手。
+                將使用者提供的原始文字轉換為結構良好的 Markdown 筆記：
+                - 使用有層次的標題（#、##、###）
+                - 條列重點與行動項目
+                - 保留重要術語與編號（如 K-number, product code）
+                - 不要虛構事實，只重排與整理
+                """)
+                user_prompt = st.session_state["note_raw"]
+                md = orchestrator.call_llm(
+                    model="gpt-4o-mini",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=DEFAULT_MAX_TOKENS,
+                    temperature=0.2,
+                )
+                st.session_state["note_md"] = md
+                st.session_state["note_md_edit_mode"] = False
+            except Exception as e:
+                st.error(f"Markdown transform error: {e}")
+
+    with c2:
+        st.markdown("#### " + t("note_markdown"))
+        st.checkbox(
+            t("edit_md_source"),
+            value=st.session_state["note_md_edit_mode"],
+            key="note_md_edit_mode",
+        )
+        if st.session_state["note_md_edit_mode"]:
+            st.session_state["note_md"] = st.text_area(
+                "",
+                value=st.session_state["note_md"],
+                height=260,
+                key="note_md_source",
+            )
+        else:
+            if st.session_state["note_md"]:
+                st.markdown(st.session_state["note_md"])
+            else:
+                st.info("No Markdown yet. Transform your note on the left side.")
+
+    st.markdown("---")
+
+    # ===== AI Formatting =====
+    st.markdown("#### " + t("ai_formatting"))
+    if st.button(t("ai_formatting")):
+        try:
+            system_prompt = textwrap.dedent("""
+            你是 Markdown 排版與風格專家。
+            目標：在保持語意不變的前提下，提升可讀性與一致性：
+            - 合理使用標題層級與分節
+            - 將列表、表格整理清楚
+            - 對關鍵定義與警示增加粗體或引用區塊
+            - 避免過度重寫內容
+            """)
+            user_prompt = st.session_state["note_md"] or st.session_state["note_raw"]
+            out = orchestrator.call_llm(
+                model="gpt-4o-mini",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=DEFAULT_MAX_TOKENS,
+                temperature=0.2,
+            )
+            st.session_state["note_md"] = out
+            st.session_state["note_md_edit_mode"] = False
+        except Exception as e:
+            st.error(f"AI formatting error: {e}")
+
+    # ===== AI Keywords =====
+    st.markdown("#### " + t("ai_keywords"))
+    kw = st.text_input(t("keywords_label"), key="kw_input")
+    color = st.color_picker(t("keyword_color"), value="#ff0000", key="kw_color")
+    if st.button(t("apply_keywords")):
+        note = st.session_state["note_md"] or st.session_state["note_raw"]
+        if not note:
+            st.warning("No note content available.")
+        else:
+            keywords = [k.strip() for k in kw.split(",") if k.strip()]
+            colored = note
+            for kword in keywords:
+                if not kword:
+                    continue
+                colored = colored.replace(
+                    kword,
+                    f"<span style='background-color:{color}33; color:{color}; font-weight:bold;'>{kword}</span>",
+                )
+            st.markdown(colored, unsafe_allow_html=True)
+
+    # ===== AI Entities =====
+    st.markdown("#### " + t("ai_entities"))
+    if st.button(t("generate_entities")):
+        try:
+            system_prompt = textwrap.dedent("""
+            你是一位醫療器材 TPLC 實體萃取專家。
+            根據以下筆記內容，擷取最多 20 個關鍵實體，輸出為 Markdown 表格，欄位包含：
+            - Entity（實體名稱）
+            - Type（類型，如 Manufacturer, Device, K-number, Product Code, Risk, Event, Regulation）
+            - Context（摘錄的關鍵語句或簡短說明）
+            - Importance（High / Medium / Low）
+            僅使用文本中可推得的資訊，不要虛構。
+            """)
+            user_prompt = st.session_state["note_md"] or st.session_state["note_raw"]
+            out = orchestrator.call_llm(
+                model="gpt-4o-mini",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=2000,
+                temperature=0.2,
+            )
+            st.markdown(out)
+        except Exception as e:
+            st.error(f"AI entities error: {e}")
+
+    # ===== AI Chat & Summary =====
+    st.markdown("---")
+    c3, c4 = st.columns(2)
+
+    with c3:
+        st.markdown("#### " + t("ai_chat"))
+        chat_model = st.selectbox(
+            t("agent_model"),
+            options=SUPPORTED_MODELS,
+            index=0,
+            key="note_chat_model",
+        )
+        chat_maxtok = st.number_input(
+            t("agent_max_tokens"),
+            min_value=64,
+            max_value=120000,
+            value=DEFAULT_MAX_TOKENS,
+            step=256,
+            key="note_chat_maxtok",
+        )
+        chat_prompt = st.text_area(
+            t("chat_prompt"),
+            value="請根據目前的筆記內容，回答我的問題。",
+            height=120,
+            key="note_chat_prompt",
+        )
+        if st.button("Run Chat", key="note_chat_run"):
+            try                :
+                system_prompt = "你是一位專精 FDA 醫療器材 TPLC 的顧問，回答時可直接引用筆記內容。"
+                user_prompt = f"=== NOTE ===\n{st.session_state['note_md'] or st.session_state['note_raw']}\n\n=== QUESTION ===\n{chat_prompt}"
+                out = orchestrator.call_llm(
+                    model=chat_model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=int(chat_maxtok),
+                    temperature=0.3,
+                )
+                st.markdown(out)
+            except Exception as e:
+                st.error(f"AI chat error: {e}")
+
+    with c4:
+        st.markdown("#### " + t("ai_summary"))
+        sum_model = st.selectbox(
+            t("agent_model"),
+            options=SUPPORTED_MODELS,
+            index=0,
+            key="note_sum_model",
+        )
+        sum_maxtok = st.number_input(
+            t("agent_max_tokens"),
+            min_value=64,
+            max_value=120000,
+            value=DEFAULT_MAX_TOKENS,
+            step=256,
+            key="note_sum_maxtok",
+        )
+        sum_prompt = st.text_area(
+            t("summary_prompt"),
+            value="請用系統化方式摘要此筆記，拆分為：背景、關鍵風險、已知事件、建議行動。",
+            height=120,
+            key="note_sum_prompt",
+        )
+        if st.button("Run Summary", key="note_sum_run"):
+            try:
+                system_prompt = "你是一位醫療器材風險與法規摘要專家。"
+                user_prompt = f"=== NOTE ===\n{st.session_state['note_md'] or st.session_state['note_raw']}\n\n=== SUMMARY INSTRUCTION ===\n{sum_prompt}"
+                out = orchestrator.call_llm(
+                    model=sum_model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=int(sum_maxtok),
+                    temperature=0.2,
+                )
+                st.markdown(out)
+            except Exception as e:
+                st.error(f"AI summary error: {e}")
+
+    # ===== AI Magics (two additional features) =====
+    st.markdown("---")
+    st.markdown("### " + t("ai_magics"))
+
+    m1, m2 = st.columns(2)
+    with m1:
+        st.markdown("#### " + t("magic_1"))
+        prompt_risk = st.text_area(
+            "自訂情境說明（選填）",
+            value="請基於筆記內容，設計 3-5 個合理的風險情境，並為每個情境給出：觸發條件、潛在後果、可能失效機制、建議控制措施。",
+            height=120,
+            key="magic1_prompt",
+        )
+        if st.button("Generate Risk Scenarios", key="magic1_run"):
+            try:
+                system_prompt = "你是一位醫療器材風險管理專家，擅長以 ISO 14971 思維設計風險情境與控制措施。"
+                user_prompt = f"=== NOTE ===\n{st.session_state['note_md'] or st.session_state['note_raw']}\n\n=== TASK ===\n{prompt_risk}"
+                out = orchestrator.call_llm(
+                    model="gpt-4o-mini",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=3000,
+                    temperature=0.35,
+                )
+                st.markdown(out)
+            except Exception as e:
+                st.error(f"AI Risk Scenarist error: {e}")
+
+    with m2:
+        st.markdown("#### " + t("magic_2"))
+        prompt_check = st.text_area(
+            "自訂檢查重點（選填）",
+            value="請將此筆記轉換為可操作的法規／合規檢查清單，每一項包含：檢查點、法規依據（若可推得）、優先層級、負責角色。",
+            height=120,
+            key="magic2_prompt",
+        )
+        if st.button("Generate Regulatory Checklist", key="magic2_run"):
+            try:
+                system_prompt = "你是一位 FDA 醫療器材法規與品質系統專家，熟悉 QSR、ISO 13485 與 TPLC 思維。"
+                user_prompt = f"=== NOTE ===\n{st.session_state['note_md'] or st.session_state['note_raw']}\n\n=== TASK ===\n{prompt_check}"
+                out = orchestrator.call_llm(
+                    model="gpt-4o-mini",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=4000,
+                    temperature=0.25,
+                )
+                st.markdown(out)
+            except Exception as e:
+                st.error(f"AI Regulatory Checklist error: {e}")
+
+
+def render_config_tab():
+    st.markdown("### " + t("config_tab"))
+
+    tabs = st.tabs([t("config_agents"), t("config_skills")])
+
+    # agents.yaml editor
+    with tabs[0]:
+        st.markdown("#### agents.yaml")
+        agents_text = yaml.safe_dump(st.session_state["agents_config"], allow_unicode=True, sort_keys=False)
+        new_text = st.text_area(
+            "",
+            value=agents_text,
+            height=400,
+            key="agents_yaml_editor",
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button(t("save_config"), key="agents_apply"):
+                try:
+                    new_cfg = yaml.safe_load(new_text) or {}
+                    st.session_state["agents_config"] = new_cfg
+                    st.success("agents.yaml applied to session.")
+                except Exception as e:
+                    st.error(f"YAML parse error: {e}")
+        with c2:
+            st.download_button(
+                t("download"),
+                data=new_text,
+                file_name="agents.yaml",
+                mime="text/yaml",
+                key="agents_download_btn",
+            )
+        with c3:
+            upload = st.file_uploader(t("upload"), type=["yaml", "yml"], key="agents_upload")
+            if upload is not None:
+                try:
+                    up_cfg = yaml.safe_load(upload.read().decode("utf-8")) or {}
+                    st.session_state["agents_config"] = up_cfg
+                    st.success("Uploaded agents.yaml applied.")
+                except Exception as e:
+                    st.error(f"Upload parse error: {e}")
+
+    # SKILL.md editor
+    with tabs[1]:
+        st.markdown("#### SKILL.md")
+        new_skill_text = st.text_area(
+            "",
+            value=st.session_state["skills_text"],
+            height=400,
+            key="skills_md_editor",
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button(t("save_config"), key="skills_apply"):
+                st.session_state["skills_text"] = new_skill_text
+                st.session_state["skills_map"] = parse_skills(new_skill_text)
+                st.success("SKILL.md applied to session.")
+        with c2:
+            st.download_button(
+                t("download"),
+                data=new_skill_text,
+                file_name="SKILL.md",
+                mime="text/markdown",
+                key="skills_download_btn",
+            )
+        with c3:
+            upload = st.file_uploader(t("upload"), type=["md", "markdown"], key="skills_upload")
+            if upload is not None:
+                try:
+                    text = upload.read().decode("utf-8")
+                    st.session_state["skills_text"] = text
+                    st.session_state["skills_map"] = parse_skills(text)
+                    st.success("Uploaded SKILL.md applied.")
+                except Exception as e:
+                    st.error(f"Upload parse error: {e}")
+
+
+# =========================
+# --------- MAIN ----------
+# =========================
 
 def main():
     st.set_page_config(
-        page_title="Agentic AI Project Orchestrator",
+        page_title="Agentic Medical Device TPLC Dashboard",
         layout="wide",
         initial_sidebar_state="expanded",
     )
     init_session_state()
-    init_api_keys_from_env()
-    apply_custom_theme()
-    refresh_config()
+    apply_theme()
 
-    sidebar_controls()
-    ui = get_ui_text()
+    st.title(t("title"))
+    render_sidebar()
 
-    st.markdown(
-        f"""
-        <div class="wow-card" style="margin-bottom:1.2rem;">
-          <div class="wow-pill">Agentic AI • Multi-LLM • Visualization</div>
-          <div class="wow-title" style="margin-top:0.4rem;">{ui["title"]}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    tab1, tab2, tab3, tab4 = st.tabs([
+        t("dashboard_tab"),
+        t("agent_lab_tab"),
+        t("note_keeper_tab"),
+        t("config_tab"),
+    ])
 
-    render_wow_status()
-
-    tabs = st.tabs(
-        [
-            ui["dashboard"],
-            ui["supply_tab"],
-            ui["agents_tab"],
-            ui["chat_tab"],
-            ui["skills_tab"],
-            ui["config"],
-        ]
-    )
-
-    # Project dashboard
-    with tabs[0]:
-        run_orchestrator_ui()
-        plan = st.session_state["project_plan"]
-        if plan:
-            st.markdown("---")
-            render_work_breakdown(plan)
-            st.markdown("---")
-            col1, col2 = st.columns(2)
-            with col1:
-                render_timeline(plan)
-            with col2:
-                render_agent_matrix(plan)
-            st.markdown("---")
-            col3, col4 = st.columns(2)
-            with col3:
-                render_risk_heatmap(plan)
-            with col4:
-                render_dependency_graph(plan)
-
-    # Medical supply chain tab
-    with tabs[1]:
-        render_supply_chain_tab()
-
-    # Agents & execution tab
-    with tabs[2]:
-        render_agents_tab()
-
-    # Refinement / prompt on plan
-    with tabs[3]:
-        render_refinement_tab()
-
-    # Skills
-    with tabs[4]:
-        st.subheader(ui["skills_tab"])
-        skills = st.session_state["skills"]
-        if not skills:
-            st.info("No skills parsed from SKILL.md.")
-        else:
-            for sid, s in skills.items():
-                with st.expander(f"{sid}"):
-                    st.markdown(f"**Description:** {s.get('description','')}")
-                    if s.get("parameters"):
-                        st.markdown(f"**Parameters:** {s.get('parameters','')}")
-                    if s.get("raw"):
-                        st.code(s["raw"], language="markdown")
-
-    # Config / API keys
-    with tabs[5]:
-        render_api_key_section()
-        st.markdown("---")
-        st.markdown("**Raw agents.yaml preview:**")
-        st.json(st.session_state["agents_config"], expanded=False)
+    with tab1:
+        render_dashboard()
+    with tab2:
+        render_agent_lab()
+    with tab3:
+        render_note_keeper()
+    with tab4:
+        render_config_tab()
 
 
 if __name__ == "__main__":
